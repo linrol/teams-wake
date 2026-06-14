@@ -39,9 +39,9 @@
 
 您可以直接下载并安装已编译好的独立 DMG 安装包：
 
-1. 下载 [Teams Wake-1.0.0.dmg](dist/Teams%20Wake-1.0.0.dmg)
-2. 双击打开并将 **Teams Wake** 拖入 **Applications (应用程序)** 目录中。
-3. 从 Launchpad 打开即可使用。
+1. **下载安装包**：前往 **[GitHub Releases 页面](https://github.com/linrol/teams-wake/releases/latest)** 下载最新的 **[Teams Wake-1.0.0.dmg](https://github.com/linrol/teams-wake/releases/download/v1.0.0/Teams.Wake-1.0.0.dmg)**（若下载缓慢，亦可直接访问 [Release v1.0.0 详情页](https://github.com/linrol/teams-wake/releases/tag/v1.0.0)）。
+2. **拖拽安装**：双击打开 `.dmg` 文件，将 **Teams Wake** 拖入系统的 **Applications (应用程序)** 目录中。
+3. **打开使用**：在 Launchpad 或应用程序目录中打开它，即可在系统右上角菜单栏看到 ☕ 图标开始使用。
 
 ---
 
