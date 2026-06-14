@@ -24,3 +24,8 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
+
+# Node / Electron build artifacts
+node_modules/
+dist/
+*.log

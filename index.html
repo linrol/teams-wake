@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Teams Wake</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Custom Title Bar for macOS (draggable) -->
+  <header class="title-bar">
+    <div class="title-text">Teams Wake</div>
+    <div class="title-controls">
+      <button id="btn-minimize" class="title-btn" title="Hide to Tray">−</button>
+    </div>
+  </header>
+
+  <main class="app-container">
+    <!-- Status & Animation Panel -->
+    <section class="status-panel">
+      <div class="glow-ring-outer">
+        <div id="status-ring" class="glow-ring">
+          <div class="glow-ring-inner">
+            <svg class="status-icon" viewBox="0 0 24 24">
+              <path id="icon-path" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm4-9H8v2h8v-2z" fill="currentColor"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="status-info">
+        <h2 id="status-text" class="status-title">Inactive</h2>
+        <p id="status-subtext" class="status-subtitle">Wake-up is currently disabled</p>
+      </div>
+      <div class="toggle-section">
+        <label class="switch-container">
+          <input type="checkbox" id="wake-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Settings Card -->
+    <section class="card settings-card">
+      <h3>Configurations</h3>
+      
+      <!-- Mode Selection -->
+      <div class="setting-group">
+        <label>Keep-Alive Mode</label>
+        <div class="segmented-control">
+          <label class="segment-label active" id="mode-focus-label">
+            <input type="radio" name="wake-mode" value="focus" checked>
+            <span>Window Switch</span>
+          </label>
+          <label class="segment-label" id="mode-wiggle-label">
+            <input type="radio" name="wake-mode" value="wiggle">
+            <span>Mouse Jiggle</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Target Application Input (only visible in focus mode) -->
+      <div class="setting-group" id="target-app-group">
+        <div class="select-header">
+          <label for="target-app-select">Target App</label>
+          <button id="btn-refresh-apps" class="btn-text" type="button">Refresh</button>
+        </div>
+        <select id="target-app-select" class="custom-select">
+          <option value="Microsoft Teams">Microsoft Teams</option>
+          <option value="custom">-- Custom App Name --</option>
+        </select>
+        <input type="text" id="target-app" class="hidden" value="Microsoft Teams" placeholder="Type custom application name">
+      </div>
+
+      <!-- Interval Slider -->
+      <div class="setting-group">
+        <div class="slider-label-container">
+          <label for="interval-slider">Interval (Minutes)</label>
+          <span id="interval-val" class="badge">3 min</span>
+        </div>
+        <input type="range" id="interval-slider" min="1" max="10" value="3" step="1">
+        <div class="slider-ticks">
+          <span>1m</span>
+          <span>3m</span>
+          <span>5m</span>
+          <span>8m</span>
+          <span>10m</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Activity Log Card -->
+    <section class="card log-card">
+      <div class="log-header">
+        <h3>Activity Log</h3>
+        <button id="btn-clear-log" class="btn-text">Clear</button>
+      </div>
+      <div id="log-container" class="log-container">
+        <div class="log-entry system-msg">
+          <span class="log-time">System</span>
+          <span class="log-msg">Teams Wake initialized and ready.</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
