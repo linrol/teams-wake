@@ -508,7 +508,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
   background: rgba(0, 0, 0, 0.2);
   border-radius: 6px;
   padding: 8px;
-  overflow: hidden;
+  overflow-y: auto;
   flex-grow: 1;
   display: flex;
   flex-direction: column;
