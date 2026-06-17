@@ -1,6 +1,6 @@
 {
   "name": "teams-wake",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Keep Microsoft Teams active on macOS",
   "main": "main.js",
   "scripts": {
@@ -28,6 +28,7 @@
       "target": [
         "dmg"
       ],
+      "icon": "assets/icon.png",
       "hardenedRuntime": false,
       "gatekeeperAssess": false
     },

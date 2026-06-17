@@ -248,6 +248,9 @@ function sendToRenderer(channel, data) {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin') {
+    app.dock.setIcon(path.join(__dirname, 'assets', 'icon.png'));
+  }
   createTray();
   createWindow();
 
