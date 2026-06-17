@@ -40,26 +40,21 @@
       </div>
     </section>
 
+    <!-- Accessibility Permission Warning -->
+    <section id="permission-warning" class="card permission-card hidden">
+      <span class="permission-icon">⚠️</span>
+      <div class="permission-content">
+        <h4>Accessibility Permission Required</h4>
+        <p>Auto-switching chats requires Accessibility permission. Enable it in macOS System Settings.</p>
+        <button id="btn-open-accessibility" class="btn-primary" style="margin-top: 4px; padding: 6px 12px; align-self: flex-start; background: var(--accent-warning); color: #12161e;">Open Settings</button>
+      </div>
+    </section>
+
     <!-- Settings Card -->
     <section class="card settings-card">
       <h3>Configurations</h3>
       
-      <!-- Mode Selection -->
-      <div class="setting-group">
-        <label>Keep-Alive Mode</label>
-        <div class="segmented-control">
-          <label class="segment-label active" id="mode-focus-label">
-            <input type="radio" name="wake-mode" value="focus" checked>
-            <span>Window Switch</span>
-          </label>
-          <label class="segment-label" id="mode-wiggle-label">
-            <input type="radio" name="wake-mode" value="wiggle">
-            <span>Mouse Jiggle</span>
-          </label>
-        </div>
-      </div>
-
-      <!-- Target Application Input (only visible in focus mode) -->
+      <!-- Target Application Input -->
       <div class="setting-group" id="target-app-group">
         <div class="select-header">
           <label for="target-app-select">Target App</label>

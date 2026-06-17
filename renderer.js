@@ -2,7 +2,6 @@
 
 // Local state variables (synchronized with Main Process)
 let isActive = false;
-let mode = 'focus';
 let intervalMinutes = 3;
 let targetApp = 'Teams';
 
@@ -21,8 +20,8 @@ const intervalSlider = document.getElementById('interval-slider');
 const intervalVal = document.getElementById('interval-val');
 const logContainer = document.getElementById('log-container');
 const btnClearLog = document.getElementById('btn-clear-log');
-const modeFocusLabel = document.getElementById('mode-focus-label');
-const modeWiggleLabel = document.getElementById('mode-wiggle-label');
+const permissionWarning = document.getElementById('permission-warning');
+const btnOpenAccessibility = document.getElementById('btn-open-accessibility');
 
 // Icons SVG Paths
 const ICON_ACTIVE = "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z";
@@ -38,7 +37,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     try {
       const status = await window.api.getCurrentStatus();
       isActive = status.isActive;
-      mode = status.mode;
       intervalMinutes = status.intervalMinutes;
       targetApp = status.targetAppName;
 
@@ -46,26 +44,22 @@ window.addEventListener('DOMContentLoaded', async () => {
       wakeToggle.checked = isActive;
       updateStatusUI(isActive);
 
-      // Set Mode Radios
-      const radio = document.querySelector(`input[name="wake-mode"][value="${mode}"]`);
-      if (radio) radio.checked = true;
-      updateModeUI(mode);
-
       // Set Interval Slider
       intervalSlider.value = intervalMinutes;
       intervalVal.textContent = `${intervalMinutes} min`;
 
       // Pre-select the target application
-      if (mode === 'focus') {
-        if (Array.from(targetAppSelect.options).some(opt => opt.value === targetApp)) {
-          targetAppSelect.value = targetApp;
-          targetAppInput.classList.add('hidden');
-        } else {
-          targetAppSelect.value = 'custom';
-          targetAppInput.value = targetApp;
-          targetAppInput.classList.remove('hidden');
-        }
+      if (Array.from(targetAppSelect.options).some(opt => opt.value === targetApp)) {
+        targetAppSelect.value = targetApp;
+        targetAppInput.classList.add('hidden');
+      } else {
+        targetAppSelect.value = 'custom';
+        targetAppInput.value = targetApp;
+        targetAppInput.classList.remove('hidden');
       }
+
+      // Check accessibility permission on startup
+      await checkAndShowPermissionWarning();
     } catch (err) {
       console.error('Failed to get status:', err);
     }
@@ -81,20 +75,41 @@ function log(msg, type = 'info') {
     <span class="log-time">[${time}]</span>
     <span class="log-msg">${msg}</span>
   `;
-  logContainer.appendChild(entry);
-  logContainer.scrollTop = logContainer.scrollHeight;
+  logContainer.prepend(entry);
 }
 
 // Sync settings to the Main process
 function syncSettings() {
   if (typeof window.api !== 'undefined') {
     window.api.updateSettings({
-      mode,
       interval: intervalMinutes,
       targetApp
     });
   }
 }
+
+// Accessibility Permission Check
+async function checkAndShowPermissionWarning() {
+  if (typeof window.api === 'undefined') return;
+  const hasPermission = await window.api.checkAccessibility();
+  if (!hasPermission) {
+    permissionWarning.classList.remove('hidden');
+  } else {
+    permissionWarning.classList.add('hidden');
+  }
+}
+
+// Open Accessibility Settings click handler
+btnOpenAccessibility.addEventListener('click', () => {
+  if (typeof window.api !== 'undefined') {
+    window.api.openAccessibilitySettings();
+  }
+});
+
+// Re-check permission when app window is focused
+window.addEventListener('focus', async () => {
+  await checkAndShowPermissionWarning();
+});
 
 // Populate running applications in the dropdown
 async function loadRunningApps() {
@@ -163,18 +178,6 @@ function handleAppSelectionChange() {
   }
 }
 
-function updateModeUI(selectedMode) {
-  if (selectedMode === 'focus') {
-    modeFocusLabel.classList.add('active');
-    modeWiggleLabel.classList.remove('active');
-    targetAppGroup.classList.remove('hidden');
-  } else {
-    modeFocusLabel.classList.remove('active');
-    modeWiggleLabel.classList.add('active');
-    targetAppGroup.classList.add('hidden');
-  }
-}
-
 function updateStatusUI(activeState) {
   if (activeState) {
     statusRing.classList.add('active');
@@ -188,23 +191,6 @@ function updateStatusUI(activeState) {
     statusSubtext.textContent = 'Wake-up is currently disabled';
   }
 }
-
-// Mode Selection Toggle Radio
-document.querySelectorAll('input[name="wake-mode"]').forEach(radio => {
-  radio.addEventListener('change', async (e) => {
-    mode = e.target.value;
-    updateModeUI(mode);
-    
-    if (mode === 'focus') {
-      log('Switched to Window Switch Mode.', 'system-msg');
-      await loadRunningApps();
-    } else {
-      log('Switched to Mouse Jiggle Mode.', 'system-msg');
-    }
-    
-    syncSettings();
-  });
-});
 
 // App Dropdown Selection Change
 targetAppSelect.addEventListener('change', () => {
@@ -239,7 +225,32 @@ intervalSlider.addEventListener('change', () => {
 });
 
 // Wake Toggle Checkbox Change
-wakeToggle.addEventListener('change', (e) => {
+wakeToggle.addEventListener('change', async (e) => {
+  if (e.target.checked) {
+    // 1. Check Accessibility Permission
+    const hasPermission = await window.api.checkAccessibility();
+    if (!hasPermission) {
+      log('Cannot enable: Accessibility permission is required.', 'error');
+      alert('Cannot enable Smart Wake:\nAccessibility permission is required. Please grant permission in System Settings first.');
+      e.target.checked = false;
+      window.api.openAccessibilitySettings();
+      return;
+    }
+
+    // 2. Check if Target App (Teams) is running
+    const response = await window.api.getRunningApps();
+    let teamsRunning = false;
+    if (response.success && response.apps) {
+      teamsRunning = response.apps.some(app => app.toLowerCase().includes(targetApp.toLowerCase()));
+    }
+    if (!teamsRunning) {
+      log(`Cannot enable: "${targetApp}" is not running.`, 'error');
+      alert(`Cannot enable Smart Wake:\n"${targetApp}" is not running. Please open it first.`);
+      e.target.checked = false;
+      return;
+    }
+  }
+
   if (typeof window.api !== 'undefined') {
     window.api.toggleActive(e.target.checked);
   }
@@ -263,15 +274,9 @@ if (typeof window.api !== 'undefined') {
     updateStatusUI(isActive);
   });
 
-  window.api.onSettingsChanged((data) => {
-    mode = data.mode;
+  window.api.onSettingsChanged(async (data) => {
     intervalMinutes = data.intervalMinutes;
     targetApp = data.targetAppName;
-
-    // Update Mode Radio
-    const radio = document.querySelector(`input[name="wake-mode"][value="${mode}"]`);
-    if (radio) radio.checked = true;
-    updateModeUI(mode);
 
     // Update Interval Slider & Value Text
     intervalSlider.value = intervalMinutes;
@@ -283,16 +288,16 @@ if (typeof window.api !== 'undefined') {
     }
 
     // Pre-select the target application
-    if (mode === 'focus') {
-      if (Array.from(targetAppSelect.options).some(opt => opt.value === targetApp)) {
-        targetAppSelect.value = targetApp;
-        targetAppInput.classList.add('hidden');
-      } else {
-        targetAppSelect.value = 'custom';
-        targetAppInput.value = targetApp;
-        targetAppInput.classList.remove('hidden');
-      }
+    if (Array.from(targetAppSelect.options).some(opt => opt.value === targetApp)) {
+      targetAppSelect.value = targetApp;
+      targetAppInput.classList.add('hidden');
+    } else {
+      targetAppSelect.value = 'custom';
+      targetAppInput.value = targetApp;
+      targetAppInput.classList.remove('hidden');
     }
+
+    await checkAndShowPermissionWarning();
   });
 
   window.api.onLog((data) => {
