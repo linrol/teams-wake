@@ -476,8 +476,16 @@ async function runWakeIteration(force = false) {
                         $.NSThread.sleepForTimeInterval(0.5);
                     } catch(wErr) {}
                     
-                    systemEvents.keystroke("2", { using: "command down" });
-                    $.NSThread.sleepForTimeInterval(2.0);
+                    // Clear any active dropdowns/modals/focus blocks (Escape key = KeyCode 53)
+                    systemEvents.keyCode(53);
+                    $.NSThread.sleepForTimeInterval(0.3);
+                    
+                    // Switch to Chat tab (Cmd + 2 - KeyCode 19 is layout-independent)
+                    // We send it twice with a delay to handle virtual desktop Space switching or window focus transition latency
+                    systemEvents.keyCode(19, { using: "command down" });
+                    $.NSThread.sleepForTimeInterval(1.0);
+                    systemEvents.keyCode(19, { using: "command down" });
+                    $.NSThread.sleepForTimeInterval(1.5);
                     
                     // Switch down 3 times
                     for (var k = 0; k < 3; k++) {
