@@ -1,11 +1,15 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, systemPreferences, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, systemPreferences, shell, powerMonitor } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const translationEngine = require('./translationEngine');
 
+// Force integrated low-power GPU to prevent battery drain from discrete GPU switching on macOS
+app.commandLine.appendSwitch('force_low_power_gpu');
+
 let mainWindow;
 let tray;
 let isQuitting = false;
+let isSystemSuspended = false;
 
 // Keep-alive state managed in the main process
 let isActive = false;
@@ -35,12 +39,13 @@ function createWindow() {
     frame: false,
     titleBarStyle: 'hidden',
     vibrancy: 'under-window',
-    visualEffectState: 'active',
+    visualEffectState: 'followWindow', // Only calculate blur when window is active, saving battery
     backgroundColor: '#00000000', // transparent for vibrancy
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: true // Throttle animations and timers when window is in background/hidden
     }
   });
 
@@ -277,6 +282,24 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+
+  // Suspend/Resume power event handling to save battery when laptop is closed
+  powerMonitor.on('suspend', () => {
+    isSystemSuspended = true;
+    if (timerId) clearTimeout(timerId);
+    if (startupTimeoutId) clearTimeout(startupTimeoutId);
+    stopArrowTranslateMonitor();
+  });
+
+  powerMonitor.on('resume', () => {
+    isSystemSuspended = false;
+    if (isActive) {
+      timerId = setTimeout(runWakeIteration, 10000);
+    }
+    if (isAutoTranslateActive) {
+      startArrowTranslateMonitor();
+    }
+  });
 });
 
 app.on('window-all-closed', () => {
@@ -499,7 +522,7 @@ function getSystemIdleTime() {
 
 // Timer Routine Execution: Cocoa Window Switching / Mouse Jiggle
 async function runWakeIteration(force = false) {
-  if (!isActive) return;
+  if (!isActive || isSystemSuspended) return;
 
   const scheduleNext = () => {
     if (isActive) {
