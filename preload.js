@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld('api', {
   toggleActive: (isActive) => ipcRenderer.send('toggle-active', isActive),
   getCurrentStatus: () => ipcRenderer.invoke('get-current-status'),
   
+  // Auto-Translate APIs
+  toggleAutoTranslate: (isActive) => ipcRenderer.send('toggle-auto-translate', isActive),
+  onAutoTranslateStatusChanged: (callback) => ipcRenderer.on('auto-translate-status-changed', (event, data) => callback(data)),
+
   // Status and log events
   onStatusChanged: (callback) => ipcRenderer.on('status-changed', (event, data) => callback(data)),
   onSettingsChanged: (callback) => ipcRenderer.on('settings-changed-from-main', (event, data) => callback(data)),

@@ -23,6 +23,9 @@ const btnClearLog = document.getElementById('btn-clear-log');
 const permissionWarning = document.getElementById('permission-warning');
 const btnOpenAccessibility = document.getElementById('btn-open-accessibility');
 
+// Auto-Translate DOM Elements
+const translateToggle = document.getElementById('translate-toggle');
+
 // Icons SVG Paths
 const ICON_ACTIVE = "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z";
 const ICON_INACTIVE = "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm4-9H8v2h8v-2z";
@@ -56,6 +59,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         targetAppSelect.value = 'custom';
         targetAppInput.value = targetApp;
         targetAppInput.classList.remove('hidden');
+      }
+
+      // Sync Auto-Translate Settings
+      if (status.isAutoTranslateActive !== undefined && translateToggle) {
+        translateToggle.checked = status.isAutoTranslateActive;
       }
 
       // Check accessibility permission on startup
@@ -179,12 +187,15 @@ function handleAppSelectionChange() {
 }
 
 function updateStatusUI(activeState) {
+  const statusPanel = document.getElementById('status-panel');
   if (activeState) {
+    if (statusPanel) statusPanel.classList.add('active');
     statusRing.classList.add('active');
     iconPath.setAttribute('d', ICON_ACTIVE);
     statusText.textContent = 'Active';
     statusSubtext.textContent = `Running every ${intervalMinutes} min`;
   } else {
+    if (statusPanel) statusPanel.classList.remove('active');
     statusRing.classList.remove('active');
     iconPath.setAttribute('d', ICON_INACTIVE);
     statusText.textContent = 'Inactive';
@@ -303,4 +314,22 @@ if (typeof window.api !== 'undefined') {
   window.api.onLog((data) => {
     log(data.msg, data.type);
   });
+
+  if (window.api.onAutoTranslateStatusChanged) {
+    window.api.onAutoTranslateStatusChanged((data) => {
+      if (translateToggle) {
+        translateToggle.checked = data.isActive;
+      }
+    });
+  }
 }
+
+// Auto-Translate Event Listeners
+if (translateToggle) {
+  translateToggle.addEventListener('change', (e) => {
+    if (typeof window.api !== 'undefined') {
+      window.api.toggleAutoTranslate(e.target.checked);
+    }
+  });
+}
+

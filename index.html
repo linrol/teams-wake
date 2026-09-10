@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,6 +8,7 @@
   <link rel="stylesheet" href="styles.css">
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
+
 <body>
   <!-- Custom Title Bar for macOS (draggable) -->
   <header class="title-bar">
@@ -17,43 +19,42 @@
   </header>
 
   <main class="app-container">
-    <!-- Status & Animation Panel -->
-    <section class="status-panel">
-      <div class="glow-ring-outer">
-        <div id="status-ring" class="glow-ring">
-          <div class="glow-ring-inner">
-            <svg class="status-icon" viewBox="0 0 24 24">
-              <path id="icon-path" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm4-9H8v2h8v-2z" fill="currentColor"/>
-            </svg>
-          </div>
-        </div>
-      </div>
-      <div class="status-info">
-        <h2 id="status-text" class="status-title">Inactive</h2>
-        <p id="status-subtext" class="status-subtitle">Wake-up is currently disabled</p>
-      </div>
-      <div class="toggle-section">
-        <label class="switch-container">
-          <input type="checkbox" id="wake-toggle">
-          <span class="slider"></span>
-        </label>
-      </div>
-    </section>
-
     <!-- Accessibility Permission Warning -->
     <section id="permission-warning" class="card permission-card hidden">
       <span class="permission-icon">⚠️</span>
       <div class="permission-content">
         <h4>Accessibility Permission Required</h4>
         <p>Auto-switching chats requires Accessibility permission. Enable it in macOS System Settings.</p>
-        <button id="btn-open-accessibility" class="btn-primary" style="margin-top: 4px; padding: 6px 12px; align-self: flex-start; background: var(--accent-warning); color: #12161e;">Open Settings</button>
+        <button id="btn-open-accessibility" class="btn-primary"
+          style="margin-top: 4px; padding: 6px 12px; align-self: flex-start; background: var(--accent-warning); color: #12161e;">Open
+          Settings</button>
       </div>
     </section>
 
-    <!-- Settings Card -->
-    <section class="card settings-card">
-      <h3>Configurations</h3>
-      
+    <!-- Smart Wake Unified Card -->
+    <section id="status-panel" class="card wake-card">
+      <div class="card-header-with-toggle">
+        <div class="status-left">
+          <div id="status-ring" class="status-badge">
+            <svg class="status-icon" viewBox="0 0 24 24">
+              <path id="icon-path"
+                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm4-9H8v2h8v-2z"
+                fill="currentColor" />
+            </svg>
+          </div>
+          <div class="status-info">
+            <h2 id="status-text" class="status-title">Inactive</h2>
+            <p id="status-subtext" class="status-subtitle">Wake-up is currently disabled</p>
+          </div>
+        </div>
+        <div class="status-right">
+          <label class="switch-container switch-md">
+            <input type="checkbox" id="wake-toggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
       <!-- Target Application Input -->
       <div class="setting-group" id="target-app-group">
         <div class="select-header">
@@ -64,11 +65,12 @@
           <option value="Microsoft Teams">Microsoft Teams</option>
           <option value="custom">-- Custom App Name --</option>
         </select>
-        <input type="text" id="target-app" class="hidden" value="Microsoft Teams" placeholder="Type custom application name">
+        <input type="text" id="target-app" class="hidden" value="Microsoft Teams"
+          placeholder="Type custom application name">
       </div>
 
       <!-- Interval Slider -->
-      <div class="setting-group">
+      <div class="setting-group" style="margin-bottom: 0;">
         <div class="slider-label-container">
           <label for="interval-slider">Interval (Minutes)</label>
           <span id="interval-val" class="badge">3 min</span>
@@ -82,6 +84,19 @@
           <span>10m</span>
         </div>
       </div>
+    </section>
+
+    <!-- Auto-Translate Card -->
+    <section class="card settings-card auto-translate-card">
+      <div class="card-header-with-toggle">
+        <h3>Auto-Translate</h3>
+        <label class="switch-container switch-sm">
+          <input type="checkbox" id="translate-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <p class="card-description">Select text in Teams and press <strong style="color: var(--accent-active);">Down Arrow
+          ↓</strong> to translate via Google Translate.</p>
     </section>
 
     <!-- Activity Log Card -->
@@ -101,4 +116,5 @@
 
   <script src="renderer.js"></script>
 </body>
+
 </html>

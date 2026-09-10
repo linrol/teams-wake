@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, systemPreferences, shell } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
+const translationEngine = require('./translationEngine');
 
 let mainWindow;
 let tray;
@@ -13,6 +14,11 @@ let targetAppName = 'Microsoft Teams';
 let timerId = null;
 let startupTimeoutId = null;
 
+// Auto-Translate state
+let isAutoTranslateActive = false;
+let arrowMonitorProc = null;
+
+
 // Path to system tray status PNG icons
 const inactiveIconPath = path.join(__dirname, 'assets', 'iconTemplate.png');
 const activeIconPath = path.join(__dirname, 'assets', 'iconActive.png');
@@ -22,9 +28,9 @@ let contextMenu;
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 380,
-    height: 680,
+    height: 550,
     minWidth: 320,
-    minHeight: 450,
+    minHeight: 420,
     resizable: true,
     frame: false,
     titleBarStyle: 'hidden',
@@ -82,6 +88,14 @@ function updateTrayMenu() {
       checked: isActive,
       click: (menuItem) => {
         toggleWakeState(menuItem.checked);
+      }
+    },
+    {
+      label: 'Enable Auto-Translate (↓)',
+      type: 'checkbox',
+      checked: isAutoTranslateActive,
+      click: (menuItem) => {
+        toggleAutoTranslateState(menuItem.checked);
       }
     },
     { type: 'separator' },
@@ -271,6 +285,100 @@ app.on('window-all-closed', () => {
   }
 });
 
+app.on('before-quit', () => {
+  isQuitting = true;
+  stopArrowTranslateMonitor();
+  if (startupTimeoutId) {
+    clearTimeout(startupTimeoutId);
+    startupTimeoutId = null;
+  }
+  if (timerId) {
+    clearTimeout(timerId);
+    timerId = null;
+  }
+});
+
+app.on('will-quit', () => {
+  stopArrowTranslateMonitor();
+});
+
+process.on('SIGTERM', () => {
+  isQuitting = true;
+  app.quit();
+});
+
+process.on('SIGINT', () => {
+  isQuitting = true;
+  app.quit();
+});
+
+// Arrow Key Translation Monitor Daemon Management
+function startArrowTranslateMonitor() {
+  stopArrowTranslateMonitor();
+  const monitorPath = path.join(__dirname, 'helpers', 'arrow_translate_monitor');
+  const fs = require('fs');
+  if (!fs.existsSync(monitorPath)) {
+    sendToRenderer('log', { msg: 'Arrow translate monitor binary not found at ' + monitorPath, type: 'error' });
+    return;
+  }
+
+  arrowMonitorProc = spawn(monitorPath, [targetAppName || 'teams'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  sendToRenderer('log', { msg: 'Down Arrow Translator ACTIVE (Select Chinese text + press ↓ to translate).', type: 'info' });
+
+  let buffer = '';
+  arrowMonitorProc.stdout.on('data', async (data) => {
+    buffer += data.toString();
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      if (trimmed.startsWith('TRANSLATE_REQ ')) {
+        const b64 = trimmed.substring('TRANSLATE_REQ '.length).trim();
+        try {
+          const originalText = Buffer.from(b64, 'base64').toString('utf8');
+          sendToRenderer('log', { msg: `[Translate] Intercepted: "${originalText}"`, type: 'info' });
+
+          const translated = await translationEngine.translate(originalText);
+          sendToRenderer('log', { msg: `[Translate] Translated -> English: "${translated}"`, type: 'success' });
+
+          const outB64 = Buffer.from(translated, 'utf8').toString('base64');
+          if (arrowMonitorProc && arrowMonitorProc.stdin.writable) {
+            arrowMonitorProc.stdin.write(`PASTE_TRANSLATION ${outB64}\n`);
+          }
+        } catch (err) {
+          sendToRenderer('log', { msg: `[Translate Error] ${err.message}`, type: 'error' });
+        }
+      } else if (trimmed === 'TRANSLATE_SUCCESS') {
+        sendToRenderer('log', { msg: '[Translate] Replaced in-place with English!', type: 'success' });
+      } else if (trimmed === 'READY') {
+        sendToRenderer('log', { msg: 'Down Arrow Translator daemon READY.', type: 'info' });
+      } else if (trimmed === 'FAILED_TO_CREATE_TAP') {
+        sendToRenderer('log', { msg: 'Failed to create system Event Tap. Please grant Accessibility permission.', type: 'error' });
+      }
+    }
+  });
+
+  arrowMonitorProc.stderr.on('data', (data) => {
+    console.error('arrow_translate_monitor stderr:', data.toString());
+  });
+
+  arrowMonitorProc.on('exit', () => {
+    arrowMonitorProc = null;
+  });
+}
+
+function stopArrowTranslateMonitor() {
+  if (arrowMonitorProc) {
+    try {
+      arrowMonitorProc.kill('SIGTERM');
+    } catch (e) { }
+    arrowMonitorProc = null;
+  }
+}
+
 // IPC Handler: Synchronize settings changed in the frontend UI
 ipcMain.on('settings-changed', (event, settings) => {
   intervalMinutes = settings.interval;
@@ -281,6 +389,11 @@ ipcMain.on('settings-changed', (event, settings) => {
     if (timerId) clearTimeout(timerId);
     timerId = setTimeout(runWakeIteration, intervalMinutes * 60 * 1000);
   }
+
+  // If auto-translate is active and target app changed, restart monitor with new target
+  if (isAutoTranslateActive) {
+    startArrowTranslateMonitor();
+  }
 });
 
 // IPC Handler: Synchronize active toggle state from the UI checkbox
@@ -288,9 +401,40 @@ ipcMain.on('toggle-active', (event, activeState) => {
   toggleWakeState(activeState);
 });
 
+function toggleAutoTranslateState(activeState) {
+  isAutoTranslateActive = activeState;
+  if (isAutoTranslateActive) {
+    const hasPermission = systemPreferences.isTrustedAccessibilityClient(false);
+    if (!hasPermission) {
+      sendToRenderer('log', { msg: 'Auto-Translate requires Accessibility permission.', type: 'error' });
+      shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
+      isAutoTranslateActive = false;
+      sendToRenderer('auto-translate-status-changed', { isActive: false });
+      updateTrayMenu();
+      return;
+    }
+    startArrowTranslateMonitor();
+  } else {
+    stopArrowTranslateMonitor();
+    sendToRenderer('log', { msg: 'Down Arrow Translator STOPPED', type: 'warning' });
+  }
+  sendToRenderer('auto-translate-status-changed', { isActive: isAutoTranslateActive });
+  updateTrayMenu();
+}
+
+// IPC Handler: Synchronize Auto-Translate toggle state
+ipcMain.on('toggle-auto-translate', (event, activeState) => {
+  toggleAutoTranslateState(activeState);
+});
+
 // IPC Handler: Request current status on DOMContentLoaded
 ipcMain.handle('get-current-status', () => {
-  return { isActive, intervalMinutes, targetAppName };
+  return {
+    isActive,
+    intervalMinutes,
+    targetAppName,
+    isAutoTranslateActive
+  };
 });
 
 // IPC Handler: Check Accessibility Permission (kept for legacy support, not required for Cocoa)
@@ -367,7 +511,7 @@ async function runWakeIteration(force = false) {
   if (!force) {
     const idleTime = await getSystemIdleTime();
     const threshold = intervalMinutes * 60;
-    
+
     if (idleTime < threshold) {
       sendToRenderer('log', {
         msg: `System active (idle time: ${Math.round(idleTime)}s < configured interval: ${threshold}s). Skipping keep-alive check.`,
