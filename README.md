@@ -28,14 +28,27 @@
   - 点击右上角状态栏的 **☕ 咖啡杯** 图标可拉起原生功能菜单。
   - 支持在状态栏直接“一键开关服务”、“调节间隔时间 (1m/3m/5m/8m/10m)”。
   - 状态栏操作与主窗口双向实时同步。
+- **全新 Auto-Translate 自动划词翻译（方向下键 `↓`）**：
+  - 在 Microsoft Teams 输入框中输入中文后，**选中文字直接按下键盘方向下键 `↓`**，系统原生 Swift 守护进程将以毫秒级拦截并将内容发送至 Google Translate 翻译，并在光标处**原位无缝替换为英文**；
+  - 纯净内置 Google Translate 引擎，零配置，无需任何 API Key，开箱即用；
+  - 若未选中文字或不是中文，下方向键保持常规移动光标，不影响日常打字操作。
+- **全新一体化 Hero 卡片与紧凑排版**：
+  - 状态指示与唤醒配置合二为一，窗口尺寸优化至最适宜的 380×550 黄金比例；
+  - 底部的 Activity Log 自动伸展，默认完整清晰呈现，消除冗余大块留白。
+- **低功耗省电与休眠保护 (Green Energy)**：
+  - 强制限制使用低功耗核显，彻底避免双显卡 MacBook 唤醒独立显卡造成的电量飙升；
+  - 实时监听 macOS 合盖与睡眠状态（`powerMonitor`），合盖放入背包时彻底静默休眠，开盖无感自恢复；
+  - 去除高频循环重绘的 CSS 动画，优化毛玻璃合成开销。
+- **彻底修复系统关机阻塞 Bug**：
+  - 规范接入 `before-quit` 生命周期，日常点击关闭依然隐蔽常驻托盘，系统关机/重启时毫秒放行，绝不再阻碍 macOS 关机。
 - **极简托盘驻留**：点击窗口最小化或关闭时自动隐藏至托盘后台运行，不占用 Dock 栏。
 
 ---
 
 ## 📸 界面预览
 
-- **未激活状态**：高阶灰静谧设计。
-- **激活状态**：霓虹翠绿呼吸灯环光效，伴随实时 keep-alive 执行日志（最新日志置顶，支持滑动查看完整历史）。
+- **未激活状态**：高阶灰静谧一体式 Hero 设计。
+- **激活状态**：精致圆角徽章常驻高亮微光，伴随实时 keep-alive 执行日志（最新日志置顶，支持滑动查看完整历史）。
 - **状态栏快捷菜单**：☕ 图标在 macOS 深浅色主题下自适应反色，菜单选项丰富，操作一步到位。
 
 ---
@@ -44,7 +57,7 @@
 
 您可以直接下载并安装已编译好的独立 DMG 安装包：
 
-1. **下载安装包**：前往 **[GitHub Releases 页面](https://github.com/linrol/teams-wake/releases/latest)** 下载最新的 **[Teams Wake-1.0.4.dmg](https://github.com/linrol/teams-wake/releases/download/v1.0.4/Teams.Wake-1.0.4.dmg)**（若下载缓慢，亦可直接访问 [Release v1.0.4 详情页](https://github.com/linrol/teams-wake/releases/tag/v1.0.4)）。
+1. **下载安装包**：前往 **[GitHub Releases 页面](https://github.com/linrol/teams-wake/releases/latest)** 下载最新的 **[Teams.Wake-1.0.5.dmg](https://github.com/linrol/teams-wake/releases/download/v1.0.5/Teams.Wake-1.0.5.dmg)**（若下载缓慢，亦可直接访问 [Release v1.0.5 详情页](https://github.com/linrol/teams-wake/releases/tag/v1.0.5)）。
 2. **拖拽安装**：双击打开 `.dmg` 文件，将 **Teams Wake** 拖入系统的 **Applications (应用程序)** 目录中。
 3. **打开使用**：在 Launchpad 或应用程序目录中打开它，即可在系统右上角菜单栏看到 ☕ 图标开始使用。
 
