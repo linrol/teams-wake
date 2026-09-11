@@ -95,8 +95,19 @@
           <span class="slider"></span>
         </label>
       </div>
-      <p class="card-description">Select text in Teams and press <strong style="color: var(--accent-active);">Down Arrow
-          ↓</strong> to translate via Google Translate.</p>
+
+      <!-- Translation Engine Select -->
+      <div class="setting-group" style="margin-top: 8px; margin-bottom: 8px;">
+        <div class="select-header">
+          <label for="translate-provider-select">Engine</label>
+        </div>
+        <select id="translate-provider-select" class="custom-select">
+          <option value="microsoft">Microsoft Translator (Bing)</option>
+          <option value="google">Google Translate</option>
+        </select>
+      </div>
+
+      <p class="card-description">Select text in Teams and press <strong style="color: var(--accent-active);">Down Arrow ↓</strong> to translate.</p>
     </section>
 
     <!-- Activity Log Card -->

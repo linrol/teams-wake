@@ -25,6 +25,7 @@ const btnOpenAccessibility = document.getElementById('btn-open-accessibility');
 
 // Auto-Translate DOM Elements
 const translateToggle = document.getElementById('translate-toggle');
+const translateProviderSelect = document.getElementById('translate-provider-select');
 
 // Icons SVG Paths
 const ICON_ACTIVE = "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z";
@@ -64,6 +65,10 @@ window.addEventListener('DOMContentLoaded', async () => {
       // Sync Auto-Translate Settings
       if (status.isAutoTranslateActive !== undefined && translateToggle) {
         translateToggle.checked = status.isAutoTranslateActive;
+      }
+
+      if (status.translationProvider && translateProviderSelect) {
+        translateProviderSelect.value = status.translationProvider;
       }
 
       // Check accessibility permission on startup
@@ -329,6 +334,16 @@ if (translateToggle) {
   translateToggle.addEventListener('change', (e) => {
     if (typeof window.api !== 'undefined') {
       window.api.toggleAutoTranslate(e.target.checked);
+    }
+  });
+}
+
+if (translateProviderSelect) {
+  translateProviderSelect.addEventListener('change', (e) => {
+    const val = e.target.value;
+    log(`Translation engine switched to: ${val === 'microsoft' ? 'Microsoft Translator' : 'Google Translate'}`, 'system-msg');
+    if (typeof window.api !== 'undefined') {
+      window.api.updateTranslationProvider(val);
     }
   });
 }

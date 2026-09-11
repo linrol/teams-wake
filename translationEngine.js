@@ -2,8 +2,23 @@ const https = require('https');
 
 class TranslationEngine {
   constructor() {
+    this.provider = 'microsoft'; // 'microsoft' | 'google'
     this.cache = new Map();
-    this.maxCacheSize = 200;
+    this.maxCacheSize = 300;
+
+    // Microsoft Bing session cache
+    this.bingSession = null;
+    this.bingSessionExpires = 0;
+  }
+
+  setProvider(provider) {
+    if (provider === 'google' || provider === 'microsoft') {
+      this.provider = provider;
+    }
+  }
+
+  getProvider() {
+    return this.provider;
   }
 
   async translate(text, from = 'zh-CN', to = 'en') {
@@ -16,24 +31,25 @@ class TranslationEngine {
     }
 
     let result = '';
-    let lastError = null;
+    const primary = this.provider;
+    const secondary = primary === 'microsoft' ? 'google' : 'microsoft';
 
-    // Channel 1: Google Chrome Extension API (highest rate limit & fast)
     try {
-      result = await this._fetchGoogleChromeEx(trimmed, from, to);
-    } catch (err1) {
-      lastError = err1;
-      // Channel 2: Google APIs GTX Endpoint with browser headers
+      if (primary === 'microsoft') {
+        result = await this._translateMicrosoft(trimmed, from, to);
+      } else {
+        result = await this._translateGoogle(trimmed, from, to);
+      }
+    } catch (primaryErr) {
+      console.warn(`[TranslationEngine] Primary provider (${primary}) failed: ${primaryErr.message}. Falling back to ${secondary}...`);
       try {
-        result = await this._fetchGoogleGtx(trimmed, from, to);
-      } catch (err2) {
-        lastError = err2;
-        // Channel 3: Google Mobile Web Endpoint
-        try {
-          result = await this._fetchGoogleWeb(trimmed, from, to);
-        } catch (err3) {
-          throw new Error(`Google API rate limited (429): all channels busy, please retry in a moment.`);
+        if (secondary === 'microsoft') {
+          result = await this._translateMicrosoft(trimmed, from, to);
+        } else {
+          result = await this._translateGoogle(trimmed, from, to);
         }
+      } catch (secondaryErr) {
+        throw new Error(`Translation failed on both providers: ${primaryErr.message} | ${secondaryErr.message}`);
       }
     }
 
@@ -46,6 +62,108 @@ class TranslationEngine {
     }
 
     return result;
+  }
+
+  /* -------------------------------------------------------------
+     Microsoft Bing / Edge Translator Implementation (Zero Key)
+  ------------------------------------------------------------- */
+  async _translateMicrosoft(text, from = 'zh-CN', to = 'en') {
+    const fromLang = from.toLowerCase().startsWith('zh') ? 'zh-Hans' : from;
+    const targetLang = to.toLowerCase().startsWith('en') ? 'en' : to;
+    const session = await this._getBingSession();
+
+    return new Promise((resolve, reject) => {
+      const postData = new URLSearchParams({
+        fromLang: fromLang,
+        text: text,
+        to: targetLang,
+        token: session.token,
+        key: session.key
+      }).toString();
+
+      const url = `https://www.bing.com/ttranslatev3?isVertical=1&&IG=${session.ig}&IID=${session.iid}`;
+      const req = https.request(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postData),
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          'Referer': 'https://www.bing.com/translator'
+        },
+        timeout: 5000
+      }, (res) => {
+        if (res.statusCode !== 200) {
+          // Clear session cache on auth failure so next call refreshes tokens
+          this.bingSession = null;
+          return reject(new Error(`Microsoft Bing HTTP ${res.statusCode}`));
+        }
+
+        let data = '';
+        res.on('data', c => data += c);
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            if (json && json[0] && json[0].translations && json[0].translations[0]) {
+              resolve(json[0].translations[0].text.trim());
+            } else {
+              this.bingSession = null;
+              reject(new Error('Unexpected Microsoft Translator response format'));
+            }
+          } catch (e) {
+            this.bingSession = null;
+            reject(new Error('Microsoft Translator parse error'));
+          }
+        });
+      }).on('error', reject);
+
+      req.write(postData);
+      req.end();
+    });
+  }
+
+  _getBingSession() {
+    if (this.bingSession && Date.now() < this.bingSessionExpires) {
+      return Promise.resolve(this.bingSession);
+    }
+
+    return new Promise((resolve, reject) => {
+      https.get('https://www.bing.com/translator', {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+        },
+        timeout: 5000
+      }, (res) => {
+        let html = '';
+        res.on('data', c => html += c);
+        res.on('end', () => {
+          const ig = (html.match(/IG:"([^"]+)"/) || [])[1];
+          const iid = (html.match(/data-iid="([^"]+)"/) || [])[1];
+          const paramsMatch = (html.match(/params_AbusePreventionHelper\s*=\s*\[([^\]]+)\]/) || [])[1];
+          if (!ig || !paramsMatch) {
+            return reject(new Error('Failed to extract Microsoft Translator session tokens'));
+          }
+          const [key, token] = paramsMatch.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+          this.bingSession = { ig, iid: iid || 'translator.5025', key, token };
+          this.bingSessionExpires = Date.now() + 3000000; // ~50 minutes
+          resolve(this.bingSession);
+        });
+      }).on('error', reject);
+    });
+  }
+
+  /* -------------------------------------------------------------
+     Google Translate Multi-Channel Implementation (Zero Key)
+  ------------------------------------------------------------- */
+  async _translateGoogle(text, from = 'zh-CN', to = 'en') {
+    try {
+      return await this._fetchGoogleChromeEx(text, from, to);
+    } catch (err1) {
+      try {
+        return await this._fetchGoogleGtx(text, from, to);
+      } catch (err2) {
+        return await this._fetchGoogleWeb(text, from, to);
+      }
+    }
   }
 
   _fetchGoogleChromeEx(text, from, to) {

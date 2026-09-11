@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('api', {
   
   // Auto-Translate APIs
   toggleAutoTranslate: (isActive) => ipcRenderer.send('toggle-auto-translate', isActive),
+  updateTranslationProvider: (provider) => ipcRenderer.send('update-translation-provider', provider),
   onAutoTranslateStatusChanged: (callback) => ipcRenderer.on('auto-translate-status-changed', (event, data) => callback(data)),
 
   // Status and log events

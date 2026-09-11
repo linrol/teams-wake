@@ -21,6 +21,7 @@ let startupTimeoutId = null;
 // Auto-Translate state
 let isAutoTranslateActive = false;
 let arrowMonitorProc = null;
+let translationProvider = 'microsoft';
 
 
 // Path to system tray status PNG icons
@@ -362,10 +363,11 @@ function startArrowTranslateMonitor() {
         const b64 = trimmed.substring('TRANSLATE_REQ '.length).trim();
         try {
           const originalText = Buffer.from(b64, 'base64').toString('utf8');
-          sendToRenderer('log', { msg: `[Translate] Intercepted: "${originalText}"`, type: 'info' });
+          const currentProviderName = translationEngine.getProvider() === 'microsoft' ? 'Microsoft' : 'Google';
+          sendToRenderer('log', { msg: `[Translate (${currentProviderName})] Intercepted: "${originalText}"`, type: 'info' });
 
           const translated = await translationEngine.translate(originalText);
-          sendToRenderer('log', { msg: `[Translate] Translated -> English: "${translated}"`, type: 'success' });
+          sendToRenderer('log', { msg: `[Translate (${currentProviderName})] -> English: "${translated}"`, type: 'success' });
 
           const outB64 = Buffer.from(translated, 'utf8').toString('base64');
           if (arrowMonitorProc && arrowMonitorProc.stdin.writable) {
@@ -450,13 +452,20 @@ ipcMain.on('toggle-auto-translate', (event, activeState) => {
   toggleAutoTranslateState(activeState);
 });
 
+// IPC Handler: Synchronize translation provider
+ipcMain.on('update-translation-provider', (event, provider) => {
+  translationProvider = provider;
+  translationEngine.setProvider(provider);
+});
+
 // IPC Handler: Request current status on DOMContentLoaded
 ipcMain.handle('get-current-status', () => {
   return {
     isActive,
     intervalMinutes,
     targetAppName,
-    isAutoTranslateActive
+    isAutoTranslateActive,
+    translationProvider
   };
 });
 
