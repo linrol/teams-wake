@@ -143,11 +143,17 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 220px;
+      max-width: 170px;
       opacity: 0.8;
     }
 
-    .btn-copy {
+    .hud-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-action {
       background: rgba(255, 255, 255, 0.08);
       border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 5px;
@@ -162,10 +168,30 @@
       transition: all 0.18s ease;
     }
 
+    .btn-replace {
+      background: rgba(0, 120, 212, 0.3);
+      border-color: rgba(0, 120, 212, 0.55);
+      color: #79c0ff;
+    }
+
+    .btn-replace:hover {
+      background: #0078d4;
+      border-color: #0078d4;
+      color: #ffffff;
+      font-weight: 600;
+      box-shadow: 0 2px 8px rgba(0, 120, 212, 0.4);
+    }
+
+    .btn-replace.replaced {
+      background: #2ed573;
+      color: #ffffff;
+      border-color: #2ed573;
+    }
+
     .btn-copy:hover {
-      background: var(--accent);
-      color: #0b1017;
-      border-color: var(--accent);
+      background: rgba(255, 255, 255, 0.18);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.3);
       font-weight: 600;
     }
 
@@ -194,9 +220,14 @@
 
     <div class="hud-footer">
       <span class="original-snippet" id="original-snippet"></span>
-      <button class="btn-copy" id="btn-copy">
-        <span id="btn-copy-text">复制</span>
-      </button>
+      <div class="hud-actions">
+        <button class="btn-action btn-replace" id="btn-replace" title="用译文替换选中文本 (Enter)">
+          <span id="btn-replace-text">Replace</span>
+        </button>
+        <button class="btn-action btn-copy" id="btn-copy" title="复制译文到剪贴板">
+          <span id="btn-copy-text">Copy</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -206,6 +237,8 @@
     const langBadgeEl = document.getElementById('lang-badge');
     const translatedTextEl = document.getElementById('translated-text');
     const originalSnippetEl = document.getElementById('original-snippet');
+    const btnReplace = document.getElementById('btn-replace');
+    const btnReplaceText = document.getElementById('btn-replace-text');
     const btnCopy = document.getElementById('btn-copy');
     const btnCopyText = document.getElementById('btn-copy-text');
     const btnClose = document.getElementById('btn-close');
@@ -246,7 +279,7 @@
       if (e.key === 'Escape') {
         dismissHud();
       } else if (e.key === 'Enter') {
-        btnCopy.click();
+        btnReplace.click();
       }
     });
 
@@ -258,10 +291,22 @@
         navigator.clipboard.writeText(currentTranslation);
       }
       btnCopy.classList.add('copied');
-      btnCopyText.textContent = '✓ 已复制';
+      btnCopyText.textContent = '✓ Copied';
       setTimeout(() => {
         dismissHud();
-      }, 600);
+      }, 500);
+    });
+
+    btnReplace.addEventListener('click', () => {
+      if (!currentTranslation) return;
+      btnReplace.classList.add('replaced');
+      btnReplaceText.textContent = '✓ Replaced';
+      if (window.hudApi) {
+        window.hudApi.replaceSelection(currentTranslation);
+      }
+      setTimeout(() => {
+        dismissHud();
+      }, 150);
     });
 
     if (window.hudApi) {
@@ -273,7 +318,9 @@
         langBadgeEl.textContent = data.direction || '外文 → 中文';
 
         btnCopy.classList.remove('copied');
-        btnCopyText.textContent = '复制';
+        btnCopyText.textContent = 'Copy';
+        btnReplace.classList.remove('replaced');
+        btnReplaceText.textContent = 'Replace';
         hudCard.style.opacity = '1';
         hudCard.style.transform = 'scale(1) translateY(0)';
 

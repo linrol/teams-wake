@@ -31,14 +31,6 @@ let translationShortcut = {
 let isHudActive = false;
 let lastFrontmostPid = null;
 
-function restorePreviousAppFocus() {
-  if (lastFrontmostPid && arrowMonitorProc && arrowMonitorProc.stdin.writable) {
-    arrowMonitorProc.stdin.write(`ACTIVATE_APP ${lastFrontmostPid}\n`);
-  } else if (process.platform === 'darwin') {
-    app.hide();
-  }
-}
-
 
 // Path to system tray status PNG icons
 const inactiveIconPath = path.join(__dirname, 'assets', 'iconTemplate.png');
@@ -108,8 +100,7 @@ function createHudWindow() {
     if (hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible()) {
       hudWindow.hide();
     }
-    restorePreviousAppFocus();
-    setTimeout(() => { isHudActive = false; }, 600);
+    isHudActive = false;
   });
 
   hudWindow.on('closed', () => {
@@ -485,8 +476,7 @@ function startArrowTranslateMonitor() {
         const minY = parts.length > 3 ? parseInt(parts[3], 10) : -1;
         const maxY = parts.length > 4 ? parseInt(parts[4], 10) : -1;
         const bounds = (minX > 0 && maxY > 0) ? { minX, maxX, minY, maxY } : null;
-        const isEditable = parts.length > 5 ? (parseInt(parts[5], 10) === 1) : false;
-        const frontPid = parts.length > 6 ? parseInt(parts[6], 10) : null;
+        const frontPid = parts.length > 5 ? parseInt(parts[5], 10) : null;
         if (frontPid) lastFrontmostPid = frontPid;
 
         try {
@@ -497,16 +487,8 @@ function startArrowTranslateMonitor() {
           const translated = await translationEngine.translate(originalText, 'zh-CN', 'en');
           sendToRenderer('log', { msg: `[Translate (${currentProviderName})] -> English: "${translated}"`, type: 'success' });
 
-          if (isEditable) {
-            // In editable input field: replace text in-place!
-            const outB64 = Buffer.from(translated, 'utf8').toString('base64');
-            if (arrowMonitorProc && arrowMonitorProc.stdin.writable) {
-              arrowMonitorProc.stdin.write(`PASTE_TRANSLATION ${outB64}\n`);
-            }
-          } else {
-            // In read-only text (划词翻译): Pop up HUD bubble with English translation!
-            showTranslationHud(originalText, translated, translationEngine.getProvider(), bounds, '中文 → 英文');
-          }
+          // Pop up HUD card with English translation and Replace / Copy buttons!
+          showTranslationHud(originalText, translated, translationEngine.getProvider(), bounds, '中文 → 英文');
         } catch (err) {
           sendToRenderer('log', { msg: `[Translate Error] ${err.message}`, type: 'error' });
         }
@@ -518,7 +500,7 @@ function startArrowTranslateMonitor() {
         const minY = parts.length > 3 ? parseInt(parts[3], 10) : -1;
         const maxY = parts.length > 4 ? parseInt(parts[4], 10) : -1;
         const bounds = (minX > 0 && maxY > 0) ? { minX, maxX, minY, maxY } : null;
-        const frontPid = parts.length > 6 ? parseInt(parts[6], 10) : null;
+        const frontPid = parts.length > 5 ? parseInt(parts[5], 10) : null;
         if (frontPid) lastFrontmostPid = frontPid;
 
         try {
@@ -529,7 +511,7 @@ function startArrowTranslateMonitor() {
           const translated = await translationEngine.translate(originalText, 'en', 'zh-CN');
           sendToRenderer('log', { msg: `[Translate (${currentProviderName})] -> 中文: "${translated}"`, type: 'success' });
 
-          // English to Chinese reading: ALWAYS show HUD bubble!
+          // Pop up HUD card with Chinese translation and Replace / Copy buttons!
           showTranslationHud(originalText, translated, translationEngine.getProvider(), bounds, '外文 → 中文');
         } catch (err) {
           sendToRenderer('log', { msg: `[Translate Error] ${err.message}`, type: 'error' });
@@ -643,8 +625,19 @@ ipcMain.on('hide-hud', () => {
   if (hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible()) {
     hudWindow.hide();
   }
-  restorePreviousAppFocus();
-  setTimeout(() => { isHudActive = false; }, 600);
+  isHudActive = false;
+});
+
+ipcMain.on('replace-selection', (event, text) => {
+  if (hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible()) {
+    hudWindow.hide();
+  }
+  isHudActive = false;
+
+  const outB64 = Buffer.from(text, 'utf8').toString('base64');
+  if (arrowMonitorProc && arrowMonitorProc.stdin.writable) {
+    arrowMonitorProc.stdin.write(`REPLACE_SELECTION ${lastFrontmostPid || 0} ${outB64}\n`);
+  }
 });
 
 ipcMain.on('copy-to-clipboard', (event, text) => {

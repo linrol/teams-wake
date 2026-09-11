@@ -65,8 +65,11 @@ func postKeyCombination(virtualKey: CGKeyCode, modifier: CGKeyCode = 0x37) {
     modUp?.flags = []
 
     modDown?.post(tap: .cghidEventTap)
+    usleep(15000)
     keyDown?.post(tap: .cghidEventTap)
+    usleep(25000)
     keyUp?.post(tap: .cghidEventTap)
+    usleep(15000)
     modUp?.post(tap: .cghidEventTap)
 }
 
@@ -80,51 +83,10 @@ func simulateCmdV() {
 
 var isTrackpadMode: Bool = (targetKeyCode == -2 || targetMods.contains("trackpad"))
 
-func isFrontmostAppEditable() -> Bool {
-    // 1. Check system-wide focused element
-    let systemWide = AXUIElementCreateSystemWide()
-    var sysElem: CFTypeRef?
-    if AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &sysElem) == .success, let elem = sysElem {
-        let axElem = elem as! AXUIElement
-        var isSettable: DarwinBoolean = false
-        if AXUIElementIsAttributeSettable(axElem, kAXValueAttribute as CFString, &isSettable) == .success, isSettable.boolValue {
-            return true
-        }
-        var role: CFTypeRef?
-        if AXUIElementCopyAttributeValue(axElem, kAXRoleAttribute as CFString, &role) == .success, let r = role as? String {
-            let lower = r.lowercased()
-            if lower.contains("textfield") || lower.contains("textarea") || lower.contains("searchfield") {
-                return true
-            }
-        }
-    }
-    
-    // 2. Check frontmost application focused element
-    guard let app = NSWorkspace.shared.frontmostApplication else { return false }
-    let axApp = AXUIElementCreateApplication(app.processIdentifier)
-    var appElem: CFTypeRef?
-    if AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &appElem) == .success, let elem = appElem {
-        let axElem = elem as! AXUIElement
-        var isSettable: DarwinBoolean = false
-        if AXUIElementIsAttributeSettable(axElem, kAXValueAttribute as CFString, &isSettable) == .success, isSettable.boolValue {
-            return true
-        }
-        var role: CFTypeRef?
-        if AXUIElementCopyAttributeValue(axElem, kAXRoleAttribute as CFString, &role) == .success, let r = role as? String {
-            let lower = r.lowercased()
-            if lower.contains("textfield") || lower.contains("textarea") || lower.contains("searchfield") {
-                return true
-            }
-        }
-    }
-    
-    return false
-}
-
 func triggerSelectionTranslation(shouldReplayKey: Bool = false) {
     if !isTargetFrontmost() { return }
 
-    let isEditable = isFrontmostAppEditable()
+    let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
 
     DispatchQueue.global(qos: .userInteractive).async {
         let oldChangeCount = NSPasteboard.general.changeCount
@@ -132,7 +94,7 @@ func triggerSelectionTranslation(shouldReplayKey: Bool = false) {
 
         let start = Date()
         var detectedNewText = false
-        while Date().timeIntervalSince(start) < 0.15 {
+        while Date().timeIntervalSince(start) < 0.20 {
             if NSPasteboard.general.changeCount != oldChangeCount {
                 detectedNewText = true
                 break
@@ -167,9 +129,9 @@ func triggerSelectionTranslation(shouldReplayKey: Bool = false) {
                 }
 
                 if containsChinese(str) {
-                    print("TRANSLATE_REQ_ZH2EN \(b64) \(minX) \(maxX) \(minY) \(maxY) \(isEditable ? 1 : 0)")
+                    print("TRANSLATE_REQ_ZH2EN \(b64) \(minX) \(maxX) \(minY) \(maxY) \(frontPid)")
                 } else {
-                    print("TRANSLATE_REQ_EN2ZH \(b64) \(minX) \(maxX) \(minY) \(maxY) \(isEditable ? 1 : 0)")
+                    print("TRANSLATE_REQ_EN2ZH \(b64) \(minX) \(maxX) \(minY) \(maxY) \(frontPid)")
                 }
                 fflush(stdout)
                 return
@@ -187,7 +149,32 @@ func triggerSelectionTranslation(shouldReplayKey: Bool = false) {
 DispatchQueue.global(qos: .userInitiated).async {
     while let line = readLine() {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.starts(with: "PASTE_TRANSLATION ") {
+        if trimmed.starts(with: "REPLACE_SELECTION ") {
+            let parts = trimmed.dropFirst("REPLACE_SELECTION ".count).split(separator: " ")
+            if parts.count >= 2 {
+                let pidStr = String(parts[0])
+                let b64 = String(parts[1])
+                if let pid = pid_t(pidStr), let data = Data(base64Encoded: b64), let text = String(data: data, encoding: .utf8) {
+                    DispatchQueue.main.async {
+                        if pid > 0, let app = NSRunningApplication(processIdentifier: pid) {
+                            if #available(macOS 14.0, *) {
+                                app.activate()
+                            } else {
+                                app.activate(options: [.activateIgnoringOtherApps])
+                            }
+                        }
+                        usleep(60000) // 60ms to let target application gain active focus
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.declareTypes([.string], owner: nil)
+                        NSPasteboard.general.setString(text, forType: .string)
+                        usleep(30000) // 30ms to register pasteboard
+                        simulateCmdV()
+                        print("TRANSLATE_SUCCESS")
+                        fflush(stdout)
+                    }
+                }
+            }
+        } else if trimmed.starts(with: "PASTE_TRANSLATION ") {
             let b64 = String(trimmed.dropFirst("PASTE_TRANSLATION ".count))
             if let data = Data(base64Encoded: b64), let text = String(data: data, encoding: .utf8) {
                 DispatchQueue.main.async {
@@ -202,6 +189,8 @@ DispatchQueue.global(qos: .userInitiated).async {
             }
         }
     }
+    // Parent Electron process closed stdin, exit cleanly
+    exit(0)
 }
 
 let eventMask = (1 << CGEventType.keyDown.rawValue) | 
