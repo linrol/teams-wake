@@ -101,7 +101,7 @@ function createHudWindow() {
   });
 }
 
-function showTranslationHud(original, translated, provider) {
+function showTranslationHud(original, translated, provider, bounds = null) {
   if (!hudWindow || hudWindow.isDestroyed()) {
     createHudWindow();
   }
@@ -110,16 +110,35 @@ function showTranslationHud(original, translated, provider) {
   const display = screen.getDisplayNearestPoint(cursor);
 
   const [width, height] = hudWindow.getSize();
-  let x = Math.round(cursor.x - width / 2);
-  let y = Math.round(cursor.y + 24);
+  let x, y;
 
-  // Keep within current display bounds
-  if (x < display.bounds.x + 10) x = display.bounds.x + 10;
-  if (x + width > display.bounds.x + display.bounds.width - 10) {
-    x = display.bounds.x + display.bounds.width - width - 10;
+  if (bounds && bounds.minX > 0 && bounds.maxY > 0) {
+    // Snap directly below the selected conversation bubble!
+    // Align left edge with start of selection/bubble
+    x = Math.round(bounds.minX);
+    // Position cleanly 8px below the bottom of the conversation line
+    y = Math.round(bounds.maxY + 8);
+  } else {
+    // Fallback: align near cursor without jumping to left sidebar
+    x = Math.round(cursor.x - 30);
+    y = Math.round(cursor.y + 24);
   }
-  if (y + height > display.bounds.y + display.bounds.height - 10) {
-    y = cursor.y - height - 16;
+
+  // Keep horizontally within current display bounds
+  if (x < display.bounds.x + 12) {
+    x = display.bounds.x + 12;
+  }
+  if (x + width > display.bounds.x + display.bounds.width - 12) {
+    x = display.bounds.x + display.bounds.width - width - 12;
+  }
+
+  // If clipping below screen bottom, flip to above the message
+  if (y + height > display.bounds.y + display.bounds.height - 15) {
+    if (bounds && bounds.minY > 0) {
+      y = Math.round(bounds.minY - height - 8);
+    } else {
+      y = Math.round(cursor.y - height - 16);
+    }
   }
 
   hudWindow.setPosition(x, y);
@@ -450,7 +469,14 @@ function startArrowTranslateMonitor() {
           sendToRenderer('log', { msg: `[Translate Error] ${err.message}`, type: 'error' });
         }
       } else if (trimmed.startsWith('TRANSLATE_REQ_EN2ZH ')) {
-        const b64 = trimmed.substring('TRANSLATE_REQ_EN2ZH '.length).trim();
+        const parts = trimmed.substring('TRANSLATE_REQ_EN2ZH '.length).trim().split(/\s+/);
+        const b64 = parts[0];
+        const minX = parts.length > 1 ? parseInt(parts[1], 10) : -1;
+        const maxX = parts.length > 2 ? parseInt(parts[2], 10) : -1;
+        const minY = parts.length > 3 ? parseInt(parts[3], 10) : -1;
+        const maxY = parts.length > 4 ? parseInt(parts[4], 10) : -1;
+        const bounds = (minX > 0 && maxY > 0) ? { minX, maxX, minY, maxY } : null;
+
         try {
           const originalText = Buffer.from(b64, 'base64').toString('utf8');
           const currentProviderName = translationEngine.getProvider() === 'microsoft' ? 'Microsoft' : 'Google';
@@ -459,7 +485,7 @@ function startArrowTranslateMonitor() {
           const translated = await translationEngine.translate(originalText, 'en', 'zh-CN');
           sendToRenderer('log', { msg: `[Translate (${currentProviderName})] -> 中文: "${translated}"`, type: 'success' });
 
-          showTranslationHud(originalText, translated, translationEngine.getProvider());
+          showTranslationHud(originalText, translated, translationEngine.getProvider(), bounds);
         } catch (err) {
           sendToRenderer('log', { msg: `[Translate Error] ${err.message}`, type: 'error' });
         }

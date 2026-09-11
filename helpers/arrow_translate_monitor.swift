@@ -17,6 +17,9 @@ func containsChinese(_ text: String) -> Bool {
 }
 
 var isReplayingDownArrow = false
+var lastMouseDownPoint: CGPoint = .zero
+var lastMouseUpPoint: CGPoint = .zero
+var lastMouseUpTime: Date = Date.distantPast
 
 func replayDownArrow() {
     isReplayingDownArrow = true
@@ -76,7 +79,7 @@ DispatchQueue.global(qos: .userInitiated).async {
     }
 }
 
-let eventMask = (1 << CGEventType.keyDown.rawValue)
+let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.leftMouseUp.rawValue)
 
 guard let tap = CGEvent.tapCreate(
     tap: .cgSessionEventTap,
@@ -90,6 +93,18 @@ guard let tap = CGEvent.tapCreate(
                 CGEvent.tapEnable(tap: machPort, enable: true)
             }
             return nil
+        }
+
+        // Track drag-selection coordinates
+        if type == .leftMouseDown {
+            lastMouseDownPoint = event.location
+            return Unmanaged.passRetained(event)
+        }
+
+        if type == .leftMouseUp {
+            lastMouseUpPoint = event.location
+            lastMouseUpTime = Date()
+            return Unmanaged.passRetained(event)
         }
 
         if isReplayingDownArrow {
@@ -134,8 +149,27 @@ guard let tap = CGEvent.tapCreate(
                             // Chinese text selected -> Translate ZH to EN, paste in-place
                             print("TRANSLATE_REQ_ZH2EN \(b64)")
                         } else {
-                            // English / Foreign text selected -> Translate EN to ZH, show in floating HUD
-                            print("TRANSLATE_REQ_EN2ZH \(b64)")
+                            // English / Foreign text selected -> Calculate selection coordinates
+                            var minX = -1
+                            var maxX = -1
+                            var minY = -1
+                            var maxY = -1
+
+                            if Date().timeIntervalSince(lastMouseUpTime) < 30.0 && lastMouseDownPoint != .zero && lastMouseUpPoint != .zero {
+                                minX = Int(min(lastMouseDownPoint.x, lastMouseUpPoint.x))
+                                maxX = Int(max(lastMouseDownPoint.x, lastMouseUpPoint.x))
+                                minY = Int(min(lastMouseDownPoint.y, lastMouseUpPoint.y))
+                                maxY = Int(max(lastMouseDownPoint.y, lastMouseUpPoint.y))
+                            } else {
+                                let loc = CGEvent(source: nil)?.location ?? .zero
+                                if loc != .zero {
+                                    minX = Int(loc.x)
+                                    maxX = Int(loc.x)
+                                    minY = Int(loc.y)
+                                    maxY = Int(loc.y)
+                                }
+                            }
+                            print("TRANSLATE_REQ_EN2ZH \(b64) \(minX) \(maxX) \(minY) \(maxY)")
                         }
                         fflush(stdout)
                         return
