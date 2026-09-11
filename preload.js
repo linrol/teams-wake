@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('api', {
   checkAccessibility: () => ipcRenderer.invoke('check-accessibility'),
   openAccessibilitySettings: () => ipcRenderer.send('open-accessibility-settings'),
   getRunningApps: () => ipcRenderer.invoke('get-running-apps'),
+  adjustWindowHeight: (height) => ipcRenderer.send('adjust-window-height', height),
   
   // Settings sync
   updateSettings: (settings) => ipcRenderer.send('settings-changed', settings),
@@ -15,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   // Auto-Translate APIs
   toggleAutoTranslate: (isActive) => ipcRenderer.send('toggle-auto-translate', isActive),
   updateTranslationProvider: (provider) => ipcRenderer.send('update-translation-provider', provider),
+  updateTranslationShortcut: (shortcut) => ipcRenderer.send('update-translation-shortcut', shortcut),
   onAutoTranslateStatusChanged: (callback) => ipcRenderer.on('auto-translate-status-changed', (event, data) => callback(data)),
 
   // Status and log events

@@ -23,6 +23,12 @@ let startupTimeoutId = null;
 let isAutoTranslateActive = false;
 let arrowMonitorProc = null;
 let translationProvider = 'microsoft';
+let translationShortcut = {
+  label: 'Down Arrow ↓',
+  keyCode: 125,
+  modifiers: 'none'
+};
+let isHudActive = false;
 
 
 // Path to system tray status PNG icons
@@ -34,9 +40,9 @@ let contextMenu;
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 380,
-    height: 550,
-    minWidth: 320,
-    minHeight: 420,
+    height: 650,
+    minWidth: 340,
+    minHeight: 480,
     resizable: true,
     frame: false,
     titleBarStyle: 'hidden',
@@ -93,14 +99,17 @@ function createHudWindow() {
     if (hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible()) {
       hudWindow.hide();
     }
+    setTimeout(() => { isHudActive = false; }, 600);
   });
 
   hudWindow.on('closed', () => {
     hudWindow = null;
+    isHudActive = false;
   });
 }
 
-function showTranslationHud(original, translated, provider, bounds = null) {
+function showTranslationHud(original, translated, provider, bounds = null, direction = '外文 → 中文') {
+  isHudActive = true;
   if (!hudWindow || hudWindow.isDestroyed()) {
     createHudWindow();
   }
@@ -145,7 +154,7 @@ function showTranslationHud(original, translated, provider, bounds = null) {
     original,
     translated,
     provider,
-    direction: '外文 → 中文'
+    direction: direction || '外文 → 中文'
   });
   hudWindow.showInactive();
 }
@@ -361,6 +370,10 @@ app.whenReady().then(() => {
   createHudWindow();
 
   app.on('activate', () => {
+    // If the activation was triggered by clicking the HUD window (close or copy button), do NOT bring up mainWindow
+    if (isHudActive) {
+      return;
+    }
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
@@ -436,8 +449,10 @@ function startArrowTranslateMonitor() {
     return;
   }
 
-  arrowMonitorProc = spawn(monitorPath, [targetAppName || 'teams'], { stdio: ['pipe', 'pipe', 'pipe'] });
-  sendToRenderer('log', { msg: 'Down Arrow Translator ACTIVE (Select Chinese text + press ↓ to translate).', type: 'info' });
+  const kc = translationShortcut.keyCode || 125;
+  const mods = translationShortcut.modifiers || 'none';
+  arrowMonitorProc = spawn(monitorPath, ['all', String(kc), mods], { stdio: ['pipe', 'pipe', 'pipe'] });
+  sendToRenderer('log', { msg: `Translate Daemon ACTIVE (Shortcut: ${translationShortcut.label}).`, type: 'info' });
 
   let buffer = '';
   arrowMonitorProc.stdout.on('data', async (data) => {
@@ -447,11 +462,17 @@ function startArrowTranslateMonitor() {
 
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed) continue;
-
       if (trimmed.startsWith('TRANSLATE_REQ_ZH2EN ') || (trimmed.startsWith('TRANSLATE_REQ ') && !trimmed.startsWith('TRANSLATE_REQ_EN2ZH '))) {
         const prefix = trimmed.startsWith('TRANSLATE_REQ_ZH2EN ') ? 'TRANSLATE_REQ_ZH2EN ' : 'TRANSLATE_REQ ';
-        const b64 = trimmed.substring(prefix.length).trim();
+        const parts = trimmed.substring(prefix.length).trim().split(/\s+/);
+        const b64 = parts[0];
+        const minX = parts.length > 1 ? parseInt(parts[1], 10) : -1;
+        const maxX = parts.length > 2 ? parseInt(parts[2], 10) : -1;
+        const minY = parts.length > 3 ? parseInt(parts[3], 10) : -1;
+        const maxY = parts.length > 4 ? parseInt(parts[4], 10) : -1;
+        const bounds = (minX > 0 && maxY > 0) ? { minX, maxX, minY, maxY } : null;
+        const isEditable = parts.length > 5 ? (parseInt(parts[5], 10) === 1) : false;
+
         try {
           const originalText = Buffer.from(b64, 'base64').toString('utf8');
           const currentProviderName = translationEngine.getProvider() === 'microsoft' ? 'Microsoft' : 'Google';
@@ -460,9 +481,15 @@ function startArrowTranslateMonitor() {
           const translated = await translationEngine.translate(originalText, 'zh-CN', 'en');
           sendToRenderer('log', { msg: `[Translate (${currentProviderName})] -> English: "${translated}"`, type: 'success' });
 
-          const outB64 = Buffer.from(translated, 'utf8').toString('base64');
-          if (arrowMonitorProc && arrowMonitorProc.stdin.writable) {
-            arrowMonitorProc.stdin.write(`PASTE_TRANSLATION ${outB64}\n`);
+          if (isEditable) {
+            // In editable input field: replace text in-place!
+            const outB64 = Buffer.from(translated, 'utf8').toString('base64');
+            if (arrowMonitorProc && arrowMonitorProc.stdin.writable) {
+              arrowMonitorProc.stdin.write(`PASTE_TRANSLATION ${outB64}\n`);
+            }
+          } else {
+            // In read-only text (划词翻译): Pop up HUD bubble with English translation!
+            showTranslationHud(originalText, translated, translationEngine.getProvider(), bounds, '中文 → 英文');
           }
         } catch (err) {
           sendToRenderer('log', { msg: `[Translate Error] ${err.message}`, type: 'error' });
@@ -484,7 +511,8 @@ function startArrowTranslateMonitor() {
           const translated = await translationEngine.translate(originalText, 'en', 'zh-CN');
           sendToRenderer('log', { msg: `[Translate (${currentProviderName})] -> 中文: "${translated}"`, type: 'success' });
 
-          showTranslationHud(originalText, translated, translationEngine.getProvider(), bounds);
+          // English to Chinese reading: ALWAYS show HUD bubble!
+          showTranslationHud(originalText, translated, translationEngine.getProvider(), bounds, '外文 → 中文');
         } catch (err) {
           sendToRenderer('log', { msg: `[Translate Error] ${err.message}`, type: 'error' });
         }
@@ -570,11 +598,34 @@ ipcMain.on('update-translation-provider', (event, provider) => {
   translationEngine.setProvider(provider);
 });
 
+// IPC Handler: Synchronize translation shortcut
+ipcMain.on('update-translation-shortcut', (event, shortcut) => {
+  translationShortcut = shortcut;
+  if (isAutoTranslateActive) {
+    startArrowTranslateMonitor();
+  }
+});
+
+// IPC Handler: Auto-adjust window height to fit content perfectly
+ipcMain.on('adjust-window-height', (event, neededHeight) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const { screen } = require('electron');
+    const [currentWidth, currentHeight] = mainWindow.getSize();
+    const display = screen.getDisplayNearestPoint(mainWindow.getBounds());
+    const maxHeight = display.workAreaSize.height - 40;
+    const targetHeight = Math.min(Math.max(Math.round(neededHeight), 480), maxHeight);
+    if (Math.abs(currentHeight - targetHeight) > 3) {
+      mainWindow.setSize(currentWidth, targetHeight);
+    }
+  }
+});
+
 // Floating HUD IPC Handlers
 ipcMain.on('hide-hud', () => {
   if (hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible()) {
     hudWindow.hide();
   }
+  setTimeout(() => { isHudActive = false; }, 600);
 });
 
 ipcMain.on('copy-to-clipboard', (event, text) => {
@@ -596,7 +647,8 @@ ipcMain.handle('get-current-status', () => {
     intervalMinutes,
     targetAppName,
     isAutoTranslateActive,
-    translationProvider
+    translationProvider,
+    translationShortcut
   };
 });
 

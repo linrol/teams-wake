@@ -96,6 +96,32 @@
         </label>
       </div>
 
+
+      <!-- Shortcut Configuration -->
+      <div class="setting-group" style="margin-top: 8px; margin-bottom: 8px;">
+        <div class="select-header" style="display: flex; justify-content: space-between; align-items: center;">
+          <label for="translate-shortcut-select">Shortcut</label>
+          <button id="btn-record-shortcut" type="button" class="badge" style="cursor: pointer; background: rgba(0,255,213,0.12); color: var(--accent-active); border: 1px solid rgba(0,255,213,0.3); border-radius: 4px; font-size: 11px; padding: 2px 7px; transition: all 0.2s ease;">Record</button>
+        </div>
+        <select id="translate-shortcut-select" class="custom-select">
+          <option value='{"label":"Down Arrow ↓","keyCode":125,"modifiers":"none"}'>Down Arrow ↓ (Default)</option>
+          <option value='{"label":"Space","keyCode":49,"modifiers":"none"}'>Space</option>
+          <option value='{"label":"Double Click","keyCode":-2,"modifiers":"trackpad_double"}'>Double Click</option>
+          <option value='{"label":"⌥ D (Option + D)","keyCode":2,"modifiers":"alt"}'>⌥ D (Option + D)</option>
+          <option value='{"label":"⌥ T (Option + T)","keyCode":17,"modifiers":"alt"}'>⌥ T (Option + T)</option>
+          <option value='{"label":"⌥ Space","keyCode":49,"modifiers":"alt"}'>⌥ Space (Option + Space)</option>
+          <option value='{"label":"⌃ Space","keyCode":49,"modifiers":"ctrl"}'>⌃ Space (Control + Space)</option>
+          <option value='{"label":"⌘ ⌥ D","keyCode":2,"modifiers":"cmd+alt"}'>⌘ ⌥ D (Command + Option + D)</option>
+          <option value='{"label":"F1","keyCode":122,"modifiers":"none"}'>F1</option>
+          <option value='{"label":"F2","keyCode":120,"modifiers":"none"}'>F2</option>
+          <option value='{"label":"F4","keyCode":118,"modifiers":"none"}'>F4</option>
+          <option id="custom-shortcut-option" value="" style="display: none;"></option>
+        </select>
+        <div id="shortcut-recording-box" style="display: none; margin-top: 6px; padding: 7px 10px; background: rgba(0,255,213,0.08); border: 1px dashed var(--accent-active); border-radius: 6px; font-size: 11px; text-align: center; color: var(--text-main);">
+          <span id="recording-prompt">Press any key or shortcut combination... <span style="color:var(--text-muted); font-size:10px;">(Esc to cancel)</span></span>
+        </div>
+      </div>
+
       <!-- Translation Engine Select -->
       <div class="setting-group" style="margin-top: 8px; margin-bottom: 8px;">
         <div class="select-header">
@@ -107,7 +133,7 @@
         </select>
       </div>
 
-      <p class="card-description">Select text in Teams and press <strong style="color: var(--accent-active);">Down Arrow ↓</strong> (Chinese to English in-place, received English to Chinese popup).</p>
+      <p class="card-description">Select text anywhere and press <strong id="shortcut-desc-key" style="color: var(--accent-active);">Down Arrow ↓</strong> to translate.</p>
     </section>
 
     <!-- Activity Log Card -->

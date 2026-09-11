@@ -2,13 +2,26 @@ import Foundation
 import Cocoa
 import CoreGraphics
 
-var targetFilter: String = CommandLine.arguments.count > 1 ? CommandLine.arguments[1].lowercased() : "teams"
+var targetFilter: String = CommandLine.arguments.count > 1 ? CommandLine.arguments[1].lowercased() : "all"
+var targetKeyCode: Int64 = CommandLine.arguments.count > 2 ? (Int64(CommandLine.arguments[2]) ?? 125) : 125
+var targetMods: String = CommandLine.arguments.count > 3 ? CommandLine.arguments[3].lowercased() : "none"
+
+var requireCmd: Bool = targetMods.contains("cmd")
+var requireAlt: Bool = targetMods.contains("alt") || targetMods.contains("opt")
+var requireCtrl: Bool = targetMods.contains("ctrl")
+var requireShift: Bool = targetMods.contains("shift")
 
 func isTargetFrontmost() -> Bool {
     guard let app = NSWorkspace.shared.frontmostApplication else { return false }
-    if targetFilter == "all" || targetFilter == "*" { return true }
     let name = app.localizedName?.lowercased() ?? ""
     let bundle = app.bundleIdentifier?.lowercased() ?? ""
+
+    // Never intercept inside Teams Wake itself
+    if name.contains("teams wake") || bundle.contains("teamswake") {
+        return false
+    }
+
+    if targetFilter == "all" || targetFilter == "*" { return true }
     return name.contains("teams") || bundle.contains("teams") || name.contains(targetFilter)
 }
 
@@ -16,16 +29,23 @@ func containsChinese(_ text: String) -> Bool {
     return text.range(of: "\\p{Han}", options: .regularExpression) != nil
 }
 
-var isReplayingDownArrow = false
+var isReplayingKey = false
 var lastMouseDownPoint: CGPoint = .zero
 var lastMouseUpPoint: CGPoint = .zero
 var lastMouseUpTime: Date = Date.distantPast
 
-func replayDownArrow() {
-    isReplayingDownArrow = true
+func replayTargetKey() {
+    isReplayingKey = true
     let src = CGEventSource(stateID: .hidSystemState)
-    let down = CGEvent(keyboardEventSource: src, virtualKey: 125, keyDown: true)
-    let up = CGEvent(keyboardEventSource: src, virtualKey: 125, keyDown: false)
+    let down = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(targetKeyCode), keyDown: true)
+    let up = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(targetKeyCode), keyDown: false)
+    var flag: CGEventFlags = []
+    if requireCmd { flag.insert(.maskCommand) }
+    if requireAlt { flag.insert(.maskAlternate) }
+    if requireCtrl { flag.insert(.maskControl) }
+    if requireShift { flag.insert(.maskShift) }
+    down?.flags = flag
+    up?.flags = flag
     down?.post(tap: .cghidEventTap)
     up?.post(tap: .cghidEventTap)
 }
@@ -58,6 +78,111 @@ func simulateCmdV() {
     postKeyCombination(virtualKey: 0x09)
 }
 
+var isTrackpadMode: Bool = (targetKeyCode == -2 || targetMods.contains("trackpad"))
+
+func isFrontmostAppEditable() -> Bool {
+    // 1. Check system-wide focused element
+    let systemWide = AXUIElementCreateSystemWide()
+    var sysElem: CFTypeRef?
+    if AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &sysElem) == .success, let elem = sysElem {
+        let axElem = elem as! AXUIElement
+        var isSettable: DarwinBoolean = false
+        if AXUIElementIsAttributeSettable(axElem, kAXValueAttribute as CFString, &isSettable) == .success, isSettable.boolValue {
+            return true
+        }
+        var role: CFTypeRef?
+        if AXUIElementCopyAttributeValue(axElem, kAXRoleAttribute as CFString, &role) == .success, let r = role as? String {
+            let lower = r.lowercased()
+            if lower.contains("textfield") || lower.contains("textarea") || lower.contains("searchfield") {
+                return true
+            }
+        }
+    }
+    
+    // 2. Check frontmost application focused element
+    guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+    let axApp = AXUIElementCreateApplication(app.processIdentifier)
+    var appElem: CFTypeRef?
+    if AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &appElem) == .success, let elem = appElem {
+        let axElem = elem as! AXUIElement
+        var isSettable: DarwinBoolean = false
+        if AXUIElementIsAttributeSettable(axElem, kAXValueAttribute as CFString, &isSettable) == .success, isSettable.boolValue {
+            return true
+        }
+        var role: CFTypeRef?
+        if AXUIElementCopyAttributeValue(axElem, kAXRoleAttribute as CFString, &role) == .success, let r = role as? String {
+            let lower = r.lowercased()
+            if lower.contains("textfield") || lower.contains("textarea") || lower.contains("searchfield") {
+                return true
+            }
+        }
+    }
+    
+    return false
+}
+
+func triggerSelectionTranslation(shouldReplayKey: Bool = false) {
+    if !isTargetFrontmost() { return }
+
+    let isEditable = isFrontmostAppEditable()
+
+    DispatchQueue.global(qos: .userInteractive).async {
+        let oldChangeCount = NSPasteboard.general.changeCount
+        simulateCmdC()
+
+        let start = Date()
+        var detectedNewText = false
+        while Date().timeIntervalSince(start) < 0.15 {
+            if NSPasteboard.general.changeCount != oldChangeCount {
+                detectedNewText = true
+                break
+            }
+            usleep(5000)
+        }
+
+        if detectedNewText, let rawStr = NSPasteboard.general.string(forType: .string) {
+            let str = rawStr.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !str.isEmpty {
+                let b64 = Data(str.utf8).base64EncodedString()
+                
+                // Calculate selection coordinates for positioning the translation bubble
+                var minX = -1
+                var maxX = -1
+                var minY = -1
+                var maxY = -1
+
+                if Date().timeIntervalSince(lastMouseUpTime) < 30.0 && lastMouseDownPoint != .zero && lastMouseUpPoint != .zero {
+                    minX = Int(min(lastMouseDownPoint.x, lastMouseUpPoint.x))
+                    maxX = Int(max(lastMouseDownPoint.x, lastMouseUpPoint.x))
+                    minY = Int(min(lastMouseDownPoint.y, lastMouseUpPoint.y))
+                    maxY = Int(max(lastMouseDownPoint.y, lastMouseUpPoint.y))
+                } else {
+                    let loc = CGEvent(source: nil)?.location ?? .zero
+                    if loc != .zero {
+                        minX = Int(loc.x)
+                        maxX = Int(loc.x)
+                        minY = Int(loc.y)
+                        maxY = Int(loc.y)
+                    }
+                }
+
+                if containsChinese(str) {
+                    print("TRANSLATE_REQ_ZH2EN \(b64) \(minX) \(maxX) \(minY) \(maxY) \(isEditable ? 1 : 0)")
+                } else {
+                    print("TRANSLATE_REQ_EN2ZH \(b64) \(minX) \(maxX) \(minY) \(maxY) \(isEditable ? 1 : 0)")
+                }
+                fflush(stdout)
+                return
+            }
+        }
+
+        // No text selected; replay target key if requested
+        if shouldReplayKey {
+            replayTargetKey()
+        }
+    }
+}
+
 // Background thread reading translation responses from Node.js
 DispatchQueue.global(qos: .userInitiated).async {
     while let line = readLine() {
@@ -79,7 +204,10 @@ DispatchQueue.global(qos: .userInitiated).async {
     }
 }
 
-let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.leftMouseUp.rawValue)
+let eventMask = (1 << CGEventType.keyDown.rawValue) | 
+                (1 << CGEventType.leftMouseDown.rawValue) | 
+                (1 << CGEventType.leftMouseUp.rawValue) | 
+                (1 << CGEventType.rightMouseDown.rawValue)
 
 guard let tap = CGEvent.tapCreate(
     tap: .cgSessionEventTap,
@@ -107,81 +235,43 @@ guard let tap = CGEvent.tapCreate(
             return Unmanaged.passRetained(event)
         }
 
-        if isReplayingDownArrow {
-            isReplayingDownArrow = false
+        // Handle Trackpad Two-Finger Double Click (Right Double-Click)
+        if type == .rightMouseDown {
+            if isTrackpadMode {
+                let clickCount = event.getIntegerValueField(.mouseEventClickState)
+                if clickCount == 2 {
+                    triggerSelectionTranslation(shouldReplayKey: false)
+                    return nil // Suppress double right-click context menu
+                }
+            }
             return Unmanaged.passRetained(event)
         }
 
-        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-        // Check for Down Arrow (125 / 0x7D)
-        if keyCode == 125 {
-            let flags = event.flags
-            let modifiers = flags.intersection([.maskCommand, .maskControl, .maskAlternate])
-            if !modifiers.isEmpty {
+        if type == .keyDown {
+            if isReplayingKey {
+                isReplayingKey = false
                 return Unmanaged.passRetained(event)
             }
 
-            if !isTargetFrontmost() {
-                return Unmanaged.passRetained(event)
-            }
+            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            // Check for configurable Target Key
+            if !isTrackpadMode && keyCode == targetKeyCode {
+                let flags = event.flags
+                let hasCmd = flags.contains(.maskCommand)
+                let hasAlt = flags.contains(.maskAlternate)
+                let hasCtrl = flags.contains(.maskControl)
+                let hasShift = flags.contains(.maskShift)
 
-            // Target app is frontmost and Down Arrow was pressed.
-            // Asynchronously probe selection so tap callback returns immediately (never blocks WindowServer)
-            DispatchQueue.global(qos: .userInteractive).async {
-                let oldChangeCount = NSPasteboard.general.changeCount
-                simulateCmdC()
-
-                let start = Date()
-                var detectedNewText = false
-                while Date().timeIntervalSince(start) < 0.15 {
-                    if NSPasteboard.general.changeCount != oldChangeCount {
-                        detectedNewText = true
-                        break
+                if hasCmd == requireCmd && hasAlt == requireAlt && hasCtrl == requireCtrl && hasShift == requireShift {
+                    if !isTargetFrontmost() {
+                        return Unmanaged.passRetained(event)
                     }
-                    usleep(5000)
+
+                    triggerSelectionTranslation(shouldReplayKey: true)
+                    return nil
                 }
-
-                if detectedNewText, let rawStr = NSPasteboard.general.string(forType: .string) {
-                    let str = rawStr.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !str.isEmpty {
-                        let b64 = Data(str.utf8).base64EncodedString()
-                        if containsChinese(str) {
-                            // Chinese text selected -> Translate ZH to EN, paste in-place
-                            print("TRANSLATE_REQ_ZH2EN \(b64)")
-                        } else {
-                            // English / Foreign text selected -> Calculate selection coordinates
-                            var minX = -1
-                            var maxX = -1
-                            var minY = -1
-                            var maxY = -1
-
-                            if Date().timeIntervalSince(lastMouseUpTime) < 30.0 && lastMouseDownPoint != .zero && lastMouseUpPoint != .zero {
-                                minX = Int(min(lastMouseDownPoint.x, lastMouseUpPoint.x))
-                                maxX = Int(max(lastMouseDownPoint.x, lastMouseUpPoint.x))
-                                minY = Int(min(lastMouseDownPoint.y, lastMouseUpPoint.y))
-                                maxY = Int(max(lastMouseDownPoint.y, lastMouseUpPoint.y))
-                            } else {
-                                let loc = CGEvent(source: nil)?.location ?? .zero
-                                if loc != .zero {
-                                    minX = Int(loc.x)
-                                    maxX = Int(loc.x)
-                                    minY = Int(loc.y)
-                                    maxY = Int(loc.y)
-                                }
-                            }
-                            print("TRANSLATE_REQ_EN2ZH \(b64) \(minX) \(maxX) \(minY) \(maxY)")
-                        }
-                        fflush(stdout)
-                        return
-                    }
-                }
-
-                // No text selected; replay Down Arrow so normal navigation occurs
-                replayDownArrow()
             }
-
-            // Consume original Down Arrow immediately
-            return nil
+            return Unmanaged.passRetained(event)
         }
 
         return Unmanaged.passRetained(event)
@@ -196,6 +286,15 @@ guard let tap = CGEvent.tapCreate(
 let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
 CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
 CGEvent.tapEnable(tap: tap, enable: true)
+
+// Also listen for Trackpad Two-Finger Double-Tap (Smart Magnify) gesture
+if isTrackpadMode {
+    _ = NSApplication.shared
+    NSEvent.addGlobalMonitorForEvents(matching: [.smartMagnify]) { _ in
+        triggerSelectionTranslation(shouldReplayKey: false)
+    }
+}
+
 print("READY")
 fflush(stdout)
 CFRunLoopRun()

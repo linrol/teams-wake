@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="UTF-8">
   <title>Teams Wake Translation HUD</title>
@@ -52,6 +53,7 @@
         opacity: 0;
         transform: scale(0.96) translateY(4px);
       }
+
       100% {
         opacity: 1;
         transform: scale(1) translateY(0);
@@ -174,6 +176,7 @@
     }
   </style>
 </head>
+
 <body>
   <div class="hud-card" id="hud-card">
     <div class="hud-header">
@@ -242,6 +245,8 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         dismissHud();
+      } else if (e.key === 'Enter') {
+        btnCopy.click();
       }
     });
 
@@ -283,4 +288,5 @@
     }
   </script>
 </body>
+
 </html>

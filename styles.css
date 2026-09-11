@@ -489,9 +489,10 @@ input[type="range"]::-webkit-slider-thumb:hover {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 110px;
+  min-height: 120px;
   overflow: hidden;
-  flex-shrink: 1;
+  flex-shrink: 0;
+  margin-bottom: 2px;
 }
 
 .log-header {
