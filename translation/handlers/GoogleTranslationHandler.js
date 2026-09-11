@@ -3,11 +3,19 @@ const BaseTranslationHandler = require('../BaseTranslationHandler');
 
 /**
  * Google Translate handler
- * Multi-channel fallback: Chrome Extension API -> GTX Endpoint -> Mobile Web
+ * Multi-channel fallback with Keep-Alive connection pooling:
+ * Channel 1: Chrome Extension API
+ * Channel 2: GTX Endpoint
+ * Channel 3: Mobile Web
  */
 class GoogleTranslationHandler extends BaseTranslationHandler {
   constructor() {
     super('google', 'Google Translate');
+    this.agent = new https.Agent({
+      keepAlive: true,
+      maxSockets: 10,
+      keepAliveMsecs: 60000
+    });
   }
 
   async translate(text, from = 'zh-CN', to = 'en') {
@@ -29,6 +37,7 @@ class GoogleTranslationHandler extends BaseTranslationHandler {
       const url = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(sourceLang)}&tl=${encodeURIComponent(targetLang)}&q=${encodeURIComponent(text)}`;
 
       const options = {
+        agent: this.agent,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
           'Accept': '*/*',
@@ -68,6 +77,7 @@ class GoogleTranslationHandler extends BaseTranslationHandler {
       const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sourceLang)}&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(text)}`;
 
       const options = {
+        agent: this.agent,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
           'Accept': '*/*',
@@ -107,6 +117,7 @@ class GoogleTranslationHandler extends BaseTranslationHandler {
       const url = `https://translate.google.com/m?sl=${encodeURIComponent(sourceLang)}&tl=${encodeURIComponent(targetLang)}&q=${encodeURIComponent(text)}`;
 
       const options = {
+        agent: this.agent,
         headers: {
           'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
