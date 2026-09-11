@@ -29,6 +29,15 @@ let translationShortcut = {
   modifiers: 'none'
 };
 let isHudActive = false;
+let lastFrontmostPid = null;
+
+function restorePreviousAppFocus() {
+  if (lastFrontmostPid && arrowMonitorProc && arrowMonitorProc.stdin.writable) {
+    arrowMonitorProc.stdin.write(`ACTIVATE_APP ${lastFrontmostPid}\n`);
+  } else if (process.platform === 'darwin') {
+    app.hide();
+  }
+}
 
 
 // Path to system tray status PNG icons
@@ -99,6 +108,7 @@ function createHudWindow() {
     if (hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible()) {
       hudWindow.hide();
     }
+    restorePreviousAppFocus();
     setTimeout(() => { isHudActive = false; }, 600);
   });
 
@@ -369,17 +379,14 @@ app.whenReady().then(() => {
   createWindow();
   createHudWindow();
 
-  app.on('activate', () => {
-    // If the activation was triggered by clicking the HUD window (close or copy button), do NOT bring up mainWindow
-    if (isHudActive) {
+  app.on('activate', (event, hasVisibleWindows) => {
+    // If HUD is active or if there are already visible windows, do NOT pop up mainWindow
+    if (isHudActive || hasVisibleWindows) {
       return;
     }
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
+    if (mainWindow && !mainWindow.isVisible()) {
       mainWindow.show();
       mainWindow.focus();
-    } else {
-      createWindow();
     }
   });
 
@@ -442,12 +449,19 @@ process.on('SIGINT', () => {
 // Arrow Key Translation Monitor Daemon Management
 function startArrowTranslateMonitor() {
   stopArrowTranslateMonitor();
-  const monitorPath = path.join(__dirname, 'helpers', 'arrow_translate_monitor');
   const fs = require('fs');
+  let monitorPath = path.join(__dirname, 'helpers', 'arrow_translate_monitor');
+  const unpackedPath = monitorPath.replace('app.asar', 'app.asar.unpacked');
+  if (fs.existsSync(unpackedPath)) {
+    monitorPath = unpackedPath;
+  }
   if (!fs.existsSync(monitorPath)) {
     sendToRenderer('log', { msg: 'Arrow translate monitor binary not found at ' + monitorPath, type: 'error' });
     return;
   }
+  try {
+    fs.chmodSync(monitorPath, 0o755);
+  } catch (e) {}
 
   const kc = translationShortcut.keyCode || 125;
   const mods = translationShortcut.modifiers || 'none';
@@ -472,6 +486,8 @@ function startArrowTranslateMonitor() {
         const maxY = parts.length > 4 ? parseInt(parts[4], 10) : -1;
         const bounds = (minX > 0 && maxY > 0) ? { minX, maxX, minY, maxY } : null;
         const isEditable = parts.length > 5 ? (parseInt(parts[5], 10) === 1) : false;
+        const frontPid = parts.length > 6 ? parseInt(parts[6], 10) : null;
+        if (frontPid) lastFrontmostPid = frontPid;
 
         try {
           const originalText = Buffer.from(b64, 'base64').toString('utf8');
@@ -502,6 +518,8 @@ function startArrowTranslateMonitor() {
         const minY = parts.length > 3 ? parseInt(parts[3], 10) : -1;
         const maxY = parts.length > 4 ? parseInt(parts[4], 10) : -1;
         const bounds = (minX > 0 && maxY > 0) ? { minX, maxX, minY, maxY } : null;
+        const frontPid = parts.length > 6 ? parseInt(parts[6], 10) : null;
+        if (frontPid) lastFrontmostPid = frontPid;
 
         try {
           const originalText = Buffer.from(b64, 'base64').toString('utf8');
@@ -625,6 +643,7 @@ ipcMain.on('hide-hud', () => {
   if (hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible()) {
     hudWindow.hide();
   }
+  restorePreviousAppFocus();
   setTimeout(() => { isHudActive = false; }, 600);
 });
 

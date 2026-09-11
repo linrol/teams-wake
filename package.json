@@ -23,6 +23,9 @@
   "build": {
     "appId": "com.linrol.teamswake",
     "productName": "Teams Wake",
+    "asarUnpack": [
+      "helpers/**/*"
+    ],
     "mac": {
       "category": "public.app-category.utilities",
       "target": [
