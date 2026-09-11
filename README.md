@@ -29,8 +29,10 @@
   - 支持在状态栏直接“一键开关服务”、“调节间隔时间 (1m/3m/5m/8m/10m)”。
   - 状态栏操作与主窗口双向实时同步。
 - **全新 Auto-Translate 自动划词翻译（方向下键 `↓`）**：
-  - 在 Microsoft Teams 输入框中输入中文后，**选中文字直接按下键盘方向下键 `↓`**，系统原生 Swift 守护进程将以毫秒级拦截并将内容发送至 Google Translate 翻译，并在光标处**原位无缝替换为英文**；
-  - 纯净内置 Google Translate 引擎，零配置，无需任何 API Key，开箱即用；
+  - 在 Microsoft Teams 输入框中输入中文后，**选中文字直接按下键盘方向下键 `↓`**，系统原生 Swift 守护进程将以毫秒级拦截并将内容发送至翻译引擎，并在光标处**原位无缝替换为英文**；
+  - **全新支持微软翻译（Microsoft Edge / Bing）与谷歌翻译（Google Translate）双引擎**：默认搭载极致超快响应的 Microsoft Edge 原生通道（~180ms 毫秒级返回，HTTP Keep-Alive 连接池复用），免任何 API Key，开箱即用；
+  - **双引擎毫秒级无感知容灾互备（Failover）**：任一翻译通道发生限流或异常时自动无缝降级重试，彻底告别 429 报错；
+  - **UI 引擎下拉选择**：在 Auto-Translate 面板中自由切换 Microsoft 或 Google 引擎；
   - 若未选中文字或不是中文，下方向键保持常规移动光标，不影响日常打字操作。
 - **全新一体化 Hero 卡片与紧凑排版**：
   - 状态指示与唤醒配置合二为一，窗口尺寸优化至最适宜的 380×550 黄金比例；
@@ -57,7 +59,7 @@
 
 您可以直接下载并安装已编译好的独立 DMG 安装包：
 
-1. **下载安装包**：前往 **[GitHub Releases 页面](https://github.com/linrol/teams-wake/releases/latest)** 下载最新的 **[Teams.Wake-1.0.5.dmg](https://github.com/linrol/teams-wake/releases/download/v1.0.5/Teams.Wake-1.0.5.dmg)**（若下载缓慢，亦可直接访问 [Release v1.0.5 详情页](https://github.com/linrol/teams-wake/releases/tag/v1.0.5)）。
+1. **下载安装包**：前往 **[GitHub Releases 页面](https://github.com/linrol/teams-wake/releases/latest)** 下载最新的 **[Teams.Wake-1.0.6.dmg](https://github.com/linrol/teams-wake/releases/download/v1.0.6/Teams.Wake-1.0.6.dmg)**（若下载缓慢，亦可直接访问 [Release v1.0.6 详情页](https://github.com/linrol/teams-wake/releases/tag/v1.0.6)）。
 2. **拖拽安装**：双击打开 `.dmg` 文件，将 **Teams Wake** 拖入系统的 **Applications (应用程序)** 目录中。
 3. **打开使用**：在 Launchpad 或应用程序目录中打开它，即可在系统右上角菜单栏看到 ☕ 图标开始使用。
 
