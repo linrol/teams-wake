@@ -79,8 +79,7 @@ function createHudWindow() {
     focusable: true,
     show: false,
     hasShadow: false,
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'hudPreload.js'),
       contextIsolation: true,

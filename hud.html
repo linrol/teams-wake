@@ -5,13 +5,13 @@
   <title>Teams Wake Translation HUD</title>
   <style>
     :root {
-      --bg: rgba(18, 22, 30, 0.85);
-      --border: rgba(255, 255, 255, 0.12);
+      --bg: rgba(22, 28, 40, 0.52);
+      --border: rgba(255, 255, 255, 0.18);
       --accent: #00ffd5;
       --accent-grad: linear-gradient(135deg, #00ffd5, #0088ff);
       --text-primary: #ffffff;
-      --text-muted: #9aa8bc;
-      --card-inner: rgba(255, 255, 255, 0.04);
+      --text-muted: #a6b5ca;
+      --card-inner: rgba(255, 255, 255, 0.08);
       --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
     }
 
@@ -28,20 +28,21 @@
       overflow: hidden;
       user-select: text;
       -webkit-font-smoothing: antialiased;
-      padding: 6px;
+      padding: 0;
+      margin: 0;
     }
 
     .hud-card {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 14px;
+      background: rgba(22, 28, 40, 0.76);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 11px;
       backdrop-filter: blur(28px);
       -webkit-backdrop-filter: blur(28px);
-      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 0 1px rgba(255, 255, 255, 0.2) inset;
-      padding: 12px 14px;
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4);
+      padding: 9px 12px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
       transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
       animation: popIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
@@ -67,11 +68,11 @@
     .provider-tag {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
       font-size: 11px;
-      font-weight: 600;
+      font-weight: 500;
       color: var(--text-muted);
-      letter-spacing: 0.3px;
+      letter-spacing: 0.2px;
     }
 
     .provider-dot {
@@ -86,10 +87,10 @@
       background: rgba(0, 255, 213, 0.12);
       color: var(--accent);
       border: 1px solid rgba(0, 255, 213, 0.25);
-      border-radius: 6px;
-      padding: 1px 6px;
+      border-radius: 5px;
+      padding: 1px 5px;
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 500;
     }
 
     .btn-close {
@@ -97,7 +98,7 @@
       border: none;
       color: var(--text-muted);
       cursor: pointer;
-      font-size: 14px;
+      font-size: 13px;
       line-height: 1;
       padding: 2px 4px;
       border-radius: 4px;
@@ -110,19 +111,18 @@
     }
 
     .hud-content {
-      background: var(--card-inner);
-      border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      padding: 10px 12px;
-      max-height: 160px;
+      padding: 1px 0;
+      max-height: 180px;
       overflow-y: auto;
     }
 
     .translated-text {
-      font-size: 14px;
-      line-height: 1.5;
-      font-weight: 500;
+      font-size: 13px;
+      line-height: 1.42;
+      font-weight: 450;
+      letter-spacing: 0.15px;
       color: #ffffff;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
       word-break: break-word;
       user-select: text;
     }
@@ -148,11 +148,11 @@
     .btn-copy {
       background: rgba(255, 255, 255, 0.08);
       border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 6px;
+      border-radius: 5px;
       color: #fff;
       font-size: 11px;
       font-weight: 500;
-      padding: 4px 10px;
+      padding: 3px 8px;
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -274,8 +274,8 @@
 
         // Report height to main process
         requestAnimationFrame(() => {
-          const height = document.body.scrollHeight + 14;
-          window.hudApi.updateHudHeight(Math.min(Math.max(height, 120), 280));
+          const height = document.body.scrollHeight;
+          window.hudApi.updateHudHeight(Math.min(Math.max(height, 90), 280));
         });
 
         resetTimer();
