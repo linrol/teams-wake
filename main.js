@@ -7,6 +7,7 @@ const translationEngine = require('./translationEngine');
 app.commandLine.appendSwitch('force_low_power_gpu');
 
 let mainWindow;
+let hudWindow = null;
 let tray;
 let isQuitting = false;
 let isSystemSuspended = false;
@@ -63,6 +64,72 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+}
+
+function createHudWindow() {
+  if (hudWindow && !hudWindow.isDestroyed()) return;
+  hudWindow = new BrowserWindow({
+    width: 360,
+    height: 160,
+    resizable: false,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: true,
+    show: false,
+    hasShadow: false,
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
+    webPreferences: {
+      preload: path.join(__dirname, 'hudPreload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  hudWindow.loadFile('hud.html');
+
+  hudWindow.on('blur', () => {
+    if (hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible()) {
+      hudWindow.hide();
+    }
+  });
+
+  hudWindow.on('closed', () => {
+    hudWindow = null;
+  });
+}
+
+function showTranslationHud(original, translated, provider) {
+  if (!hudWindow || hudWindow.isDestroyed()) {
+    createHudWindow();
+  }
+  const { screen } = require('electron');
+  const cursor = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursor);
+
+  const [width, height] = hudWindow.getSize();
+  let x = Math.round(cursor.x - width / 2);
+  let y = Math.round(cursor.y + 24);
+
+  // Keep within current display bounds
+  if (x < display.bounds.x + 10) x = display.bounds.x + 10;
+  if (x + width > display.bounds.x + display.bounds.width - 10) {
+    x = display.bounds.x + display.bounds.width - width - 10;
+  }
+  if (y + height > display.bounds.y + display.bounds.height - 10) {
+    y = cursor.y - height - 16;
+  }
+
+  hudWindow.setPosition(x, y);
+  hudWindow.webContents.send('show-hud', {
+    original,
+    translated,
+    provider,
+    direction: '外文 → 中文'
+  });
+  hudWindow.showInactive();
 }
 
 function createTray() {
@@ -273,6 +340,7 @@ app.whenReady().then(() => {
   }
   createTray();
   createWindow();
+  createHudWindow();
 
   app.on('activate', () => {
     if (mainWindow) {
@@ -312,6 +380,10 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isQuitting = true;
   stopArrowTranslateMonitor();
+  if (hudWindow && !hudWindow.isDestroyed()) {
+    hudWindow.destroy();
+    hudWindow = null;
+  }
   if (startupTimeoutId) {
     clearTimeout(startupTimeoutId);
     startupTimeoutId = null;
@@ -359,20 +431,35 @@ function startArrowTranslateMonitor() {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
-      if (trimmed.startsWith('TRANSLATE_REQ ')) {
-        const b64 = trimmed.substring('TRANSLATE_REQ '.length).trim();
+      if (trimmed.startsWith('TRANSLATE_REQ_ZH2EN ') || (trimmed.startsWith('TRANSLATE_REQ ') && !trimmed.startsWith('TRANSLATE_REQ_EN2ZH '))) {
+        const prefix = trimmed.startsWith('TRANSLATE_REQ_ZH2EN ') ? 'TRANSLATE_REQ_ZH2EN ' : 'TRANSLATE_REQ ';
+        const b64 = trimmed.substring(prefix.length).trim();
         try {
           const originalText = Buffer.from(b64, 'base64').toString('utf8');
           const currentProviderName = translationEngine.getProvider() === 'microsoft' ? 'Microsoft' : 'Google';
-          sendToRenderer('log', { msg: `[Translate (${currentProviderName})] Intercepted: "${originalText}"`, type: 'info' });
+          sendToRenderer('log', { msg: `[Translate (${currentProviderName})] Selected (ZH->EN): "${originalText}"`, type: 'info' });
 
-          const translated = await translationEngine.translate(originalText);
+          const translated = await translationEngine.translate(originalText, 'zh-CN', 'en');
           sendToRenderer('log', { msg: `[Translate (${currentProviderName})] -> English: "${translated}"`, type: 'success' });
 
           const outB64 = Buffer.from(translated, 'utf8').toString('base64');
           if (arrowMonitorProc && arrowMonitorProc.stdin.writable) {
             arrowMonitorProc.stdin.write(`PASTE_TRANSLATION ${outB64}\n`);
           }
+        } catch (err) {
+          sendToRenderer('log', { msg: `[Translate Error] ${err.message}`, type: 'error' });
+        }
+      } else if (trimmed.startsWith('TRANSLATE_REQ_EN2ZH ')) {
+        const b64 = trimmed.substring('TRANSLATE_REQ_EN2ZH '.length).trim();
+        try {
+          const originalText = Buffer.from(b64, 'base64').toString('utf8');
+          const currentProviderName = translationEngine.getProvider() === 'microsoft' ? 'Microsoft' : 'Google';
+          sendToRenderer('log', { msg: `[Translate (${currentProviderName})] Selected Message (EN->ZH): "${originalText}"`, type: 'info' });
+
+          const translated = await translationEngine.translate(originalText, 'en', 'zh-CN');
+          sendToRenderer('log', { msg: `[Translate (${currentProviderName})] -> 中文: "${translated}"`, type: 'success' });
+
+          showTranslationHud(originalText, translated, translationEngine.getProvider());
         } catch (err) {
           sendToRenderer('log', { msg: `[Translate Error] ${err.message}`, type: 'error' });
         }
@@ -456,6 +543,25 @@ ipcMain.on('toggle-auto-translate', (event, activeState) => {
 ipcMain.on('update-translation-provider', (event, provider) => {
   translationProvider = provider;
   translationEngine.setProvider(provider);
+});
+
+// Floating HUD IPC Handlers
+ipcMain.on('hide-hud', () => {
+  if (hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible()) {
+    hudWindow.hide();
+  }
+});
+
+ipcMain.on('copy-to-clipboard', (event, text) => {
+  const { clipboard } = require('electron');
+  clipboard.writeText(text);
+});
+
+ipcMain.on('update-hud-height', (event, height) => {
+  if (hudWindow && !hudWindow.isDestroyed()) {
+    const [w] = hudWindow.getSize();
+    hudWindow.setSize(w, Math.round(height));
+  }
 });
 
 // IPC Handler: Request current status on DOMContentLoaded

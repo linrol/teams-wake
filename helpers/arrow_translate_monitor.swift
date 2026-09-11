@@ -118,7 +118,7 @@ guard let tap = CGEvent.tapCreate(
 
                 let start = Date()
                 var detectedNewText = false
-                while Date().timeIntervalSince(start) < 0.10 {
+                while Date().timeIntervalSince(start) < 0.15 {
                     if NSPasteboard.general.changeCount != oldChangeCount {
                         detectedNewText = true
                         break
@@ -126,15 +126,24 @@ guard let tap = CGEvent.tapCreate(
                     usleep(5000)
                 }
 
-                if detectedNewText, let str = NSPasteboard.general.string(forType: .string), containsChinese(str) {
-                    // Chinese text is selected! Request translation
-                    let b64 = Data(str.utf8).base64EncodedString()
-                    print("TRANSLATE_REQ \(b64)")
-                    fflush(stdout)
-                } else {
-                    // No Chinese text selected; replay Down Arrow so normal navigation occurs
-                    replayDownArrow()
+                if detectedNewText, let rawStr = NSPasteboard.general.string(forType: .string) {
+                    let str = rawStr.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !str.isEmpty {
+                        let b64 = Data(str.utf8).base64EncodedString()
+                        if containsChinese(str) {
+                            // Chinese text selected -> Translate ZH to EN, paste in-place
+                            print("TRANSLATE_REQ_ZH2EN \(b64)")
+                        } else {
+                            // English / Foreign text selected -> Translate EN to ZH, show in floating HUD
+                            print("TRANSLATE_REQ_EN2ZH \(b64)")
+                        }
+                        fflush(stdout)
+                        return
+                    }
                 }
+
+                // No text selected; replay Down Arrow so normal navigation occurs
+                replayDownArrow()
             }
 
             // Consume original Down Arrow immediately

@@ -19,8 +19,8 @@ class MicrosoftTranslationHandler extends BaseTranslationHandler {
   }
 
   async translate(text, from = 'zh-CN', to = 'en') {
-    const fromLang = from.toLowerCase().startsWith('zh') ? 'zh-Hans' : from;
-    const targetLang = to.toLowerCase().startsWith('en') ? 'en' : to;
+    const fromLang = from.toLowerCase().startsWith('zh') ? 'zh-Hans' : (from.toLowerCase().startsWith('en') ? 'en' : from);
+    const targetLang = to.toLowerCase().startsWith('zh') ? 'zh-Hans' : (to.toLowerCase().startsWith('en') ? 'en' : to);
 
     // Channel 1: Edge Browser Internal API (Fastest: ~180-400ms, no token needed)
     try {

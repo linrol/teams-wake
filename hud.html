@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Teams Wake Translation HUD</title>
+  <style>
+    :root {
+      --bg: rgba(18, 22, 30, 0.85);
+      --border: rgba(255, 255, 255, 0.12);
+      --accent: #00ffd5;
+      --accent-grad: linear-gradient(135deg, #00ffd5, #0088ff);
+      --text-primary: #ffffff;
+      --text-muted: #9aa8bc;
+      --card-inner: rgba(255, 255, 255, 0.04);
+      --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-family);
+      background: transparent;
+      color: var(--text-primary);
+      overflow: hidden;
+      user-select: text;
+      -webkit-font-smoothing: antialiased;
+      padding: 6px;
+    }
+
+    .hud-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 0 1px rgba(255, 255, 255, 0.2) inset;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      animation: popIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    @keyframes popIn {
+      0% {
+        opacity: 0;
+        transform: scale(0.96) translateY(4px);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
+    .hud-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+    }
+
+    .provider-tag {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 0.3px;
+    }
+
+    .provider-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 6px var(--accent);
+    }
+
+    .lang-badge {
+      background: rgba(0, 255, 213, 0.12);
+      color: var(--accent);
+      border: 1px solid rgba(0, 255, 213, 0.25);
+      border-radius: 6px;
+      padding: 1px 6px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .btn-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: all 0.15s ease;
+    }
+
+    .btn-close:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .hud-content {
+      background: var(--card-inner);
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 10px 12px;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+
+    .translated-text {
+      font-size: 14px;
+      line-height: 1.5;
+      font-weight: 500;
+      color: #ffffff;
+      word-break: break-word;
+      user-select: text;
+    }
+
+    .hud-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+      padding-top: 2px;
+    }
+
+    .original-snippet {
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 220px;
+      opacity: 0.8;
+    }
+
+    .btn-copy {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 6px;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 4px 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.18s ease;
+    }
+
+    .btn-copy:hover {
+      background: var(--accent);
+      color: #0b1017;
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+
+    .btn-copy.copied {
+      background: #2ed573;
+      color: #ffffff;
+      border-color: #2ed573;
+    }
+  </style>
+</head>
+<body>
+  <div class="hud-card" id="hud-card">
+    <div class="hud-header">
+      <div class="provider-tag">
+        <span class="provider-dot"></span>
+        <span id="provider-name">Microsoft Translator</span>
+        <span class="lang-badge" id="lang-badge">外文 → 中文</span>
+      </div>
+      <button class="btn-close" id="btn-close" title="关闭 (Esc)">✕</button>
+    </div>
+
+    <div class="hud-content">
+      <div class="translated-text" id="translated-text">正在翻译...</div>
+    </div>
+
+    <div class="hud-footer">
+      <span class="original-snippet" id="original-snippet"></span>
+      <button class="btn-copy" id="btn-copy">
+        <span id="btn-copy-text">复制</span>
+      </button>
+    </div>
+  </div>
+
+  <script>
+    const hudCard = document.getElementById('hud-card');
+    const providerNameEl = document.getElementById('provider-name');
+    const langBadgeEl = document.getElementById('lang-badge');
+    const translatedTextEl = document.getElementById('translated-text');
+    const originalSnippetEl = document.getElementById('original-snippet');
+    const btnCopy = document.getElementById('btn-copy');
+    const btnCopyText = document.getElementById('btn-copy-text');
+    const btnClose = document.getElementById('btn-close');
+
+    let currentTranslation = '';
+    let autoDismissTimer = null;
+
+    function resetTimer() {
+      if (autoDismissTimer) clearTimeout(autoDismissTimer);
+      autoDismissTimer = setTimeout(() => {
+        dismissHud();
+      }, 6000);
+    }
+
+    function dismissHud() {
+      if (autoDismissTimer) clearTimeout(autoDismissTimer);
+      hudCard.style.opacity = '0';
+      hudCard.style.transform = 'scale(0.96) translateY(4px)';
+      setTimeout(() => {
+        if (window.hudApi) window.hudApi.hideHud();
+      }, 200);
+    }
+
+    // Pause timer on hover
+    hudCard.addEventListener('mouseenter', () => {
+      if (autoDismissTimer) clearTimeout(autoDismissTimer);
+    });
+
+    hudCard.addEventListener('mouseleave', () => {
+      resetTimer();
+    });
+
+    btnClose.addEventListener('click', () => {
+      dismissHud();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        dismissHud();
+      }
+    });
+
+    btnCopy.addEventListener('click', () => {
+      if (!currentTranslation) return;
+      if (window.hudApi) {
+        window.hudApi.copyToClipboard(currentTranslation);
+      } else {
+        navigator.clipboard.writeText(currentTranslation);
+      }
+      btnCopy.classList.add('copied');
+      btnCopyText.textContent = '✓ 已复制';
+      setTimeout(() => {
+        dismissHud();
+      }, 600);
+    });
+
+    if (window.hudApi) {
+      window.hudApi.onShowHud((data) => {
+        currentTranslation = data.translated || '';
+        translatedTextEl.textContent = currentTranslation;
+        originalSnippetEl.textContent = data.original || '';
+        providerNameEl.textContent = data.provider === 'google' ? 'Google Translate' : 'Microsoft Translator';
+        langBadgeEl.textContent = data.direction || '外文 → 中文';
+
+        btnCopy.classList.remove('copied');
+        btnCopyText.textContent = '复制';
+        hudCard.style.opacity = '1';
+        hudCard.style.transform = 'scale(1) translateY(0)';
+
+        // Report height to main process
+        requestAnimationFrame(() => {
+          const height = document.body.scrollHeight + 14;
+          window.hudApi.updateHudHeight(Math.min(Math.max(height, 120), 280));
+        });
+
+        resetTimer();
+      });
+    }
+  </script>
+</body>
+</html>
