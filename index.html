@@ -42,13 +42,24 @@
     <div id="panel-wake" class="tab-panel active">
       <!-- Accessibility Permission Warning -->
       <section id="permission-warning" class="card permission-card hidden">
-        <span class="permission-icon">⚠️</span>
+        <div class="permission-icon-box">
+          <svg class="permission-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </div>
         <div class="permission-content">
-          <h4>Accessibility Permission Required</h4>
+          <div class="permission-header">
+            <h4>Accessibility Permission Required</h4>
+          </div>
           <p>Auto-switching chats requires Accessibility permission. Enable it in macOS System Settings.</p>
-          <button id="btn-open-accessibility" class="btn-primary"
-            style="margin-top: 4px; padding: 6px 12px; align-self: flex-start; background: var(--accent-warning); color: #12161e;">Open
-            Settings</button>
+          <button id="btn-open-accessibility" class="btn-warning" type="button">
+            <span>Open System Settings</span>
+            <svg class="btn-arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M7 17l9.2-9.2M17 17V8H8" />
+            </svg>
+          </button>
         </div>
       </section>
 
