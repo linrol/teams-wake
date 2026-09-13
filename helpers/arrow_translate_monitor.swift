@@ -230,10 +230,14 @@ DispatchQueue.global(qos: .userInitiated).async {
     exit(0)
 }
 
-let eventMask = (1 << CGEventType.keyDown.rawValue) | 
-                (1 << CGEventType.leftMouseDown.rawValue) | 
-                (1 << CGEventType.leftMouseUp.rawValue) | 
-                (1 << CGEventType.rightMouseDown.rawValue)
+var globalTapPort: CFMachPort?
+
+// Active event tap mask: ONLY intercept keys and right double-clicks.
+// Left mouse down/up are monitored via non-blocking NSEvent to prevent system hangs!
+var eventMask = (1 << CGEventType.keyDown.rawValue)
+if isTrackpadMode {
+    eventMask |= (1 << CGEventType.rightMouseDown.rawValue)
+}
 
 guard let tap = CGEvent.tapCreate(
     tap: .cgSessionEventTap,
@@ -241,36 +245,22 @@ guard let tap = CGEvent.tapCreate(
     options: .defaultTap,
     eventsOfInterest: CGEventMask(eventMask),
     callback: { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
+        // CRITICAL BUG FIX: When user toggles off Accessibility in System Settings,
+        // macOS sends tapDisabledByUserInput. We MUST exit immediately and release the tap!
+        // Otherwise, WindowServer deadlocks waiting for active filter and FREEZES the whole OS!
+        if type == .tapDisabledByUserInput {
+            fputs("Event tap disabled by user input (Accessibility revoked). Exiting gracefully.\n", stderr)
+            if let port = globalTapPort {
+                CGEvent.tapEnable(tap: port, enable: false)
+            }
+            exit(0)
+        }
+
         if type == .tapDisabledByTimeout {
-            if let tap = refcon {
-                let machPort = Unmanaged<CFMachPort>.fromOpaque(tap).takeUnretainedValue()
-                CGEvent.tapEnable(tap: machPort, enable: true)
+            if let port = globalTapPort {
+                CGEvent.tapEnable(tap: port, enable: true)
             }
             return nil
-        }
-
-        // Check for click-outside to auto-dismiss Translation HUD
-        if isHudVisible && Date().timeIntervalSince(hudShownTime) > 0.15 {
-            if type == .leftMouseDown || type == .rightMouseDown {
-                let p = event.location
-                if p.x < hudMinX || p.x > hudMaxX || p.y < hudMinY || p.y > hudMaxY {
-                    isHudVisible = false
-                    print("HUD_CLICK_OUTSIDE")
-                    fflush(stdout)
-                }
-            }
-        }
-
-        // Track drag-selection coordinates
-        if type == .leftMouseDown {
-            lastMouseDownPoint = event.location
-            return Unmanaged.passRetained(event)
-        }
-
-        if type == .leftMouseUp {
-            lastMouseUpPoint = event.location
-            lastMouseUpTime = Date()
-            return Unmanaged.passRetained(event)
         }
 
         // Handle Trackpad Two-Finger Double Click (Right Double-Click)
@@ -334,13 +324,33 @@ guard let tap = CGEvent.tapCreate(
     exit(1)
 }
 
+globalTapPort = tap
 let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
 CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
 CGEvent.tapEnable(tap: tap, enable: true)
 
+// Non-blocking Passive Global Monitor for Mouse Left Down / Up:
+// Safe tracking of selection coordinates and click-outside dismissal without blocking WindowServer!
+_ = NSApplication.shared
+NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { nsEvent in
+    let loc = CGEvent(source: nil)?.location ?? .zero
+    if nsEvent.type == .leftMouseDown {
+        lastMouseDownPoint = loc
+        if isHudVisible && Date().timeIntervalSince(hudShownTime) > 0.15 {
+            if loc.x < hudMinX || loc.x > hudMaxX || loc.y < hudMinY || loc.y > hudMaxY {
+                isHudVisible = false
+                print("HUD_CLICK_OUTSIDE")
+                fflush(stdout)
+            }
+        }
+    } else if nsEvent.type == .leftMouseUp {
+        lastMouseUpPoint = loc
+        lastMouseUpTime = Date()
+    }
+}
+
 // Also listen for Trackpad Two-Finger Double-Tap (Smart Magnify) gesture
 if isTrackpadMode {
-    _ = NSApplication.shared
     NSEvent.addGlobalMonitorForEvents(matching: [.smartMagnify]) { _ in
         dismissContextMenu()
         triggerSelectionTranslation(shouldReplayKey: false)

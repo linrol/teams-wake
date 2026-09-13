@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
   toggleAutoTranslate: (isActive) => ipcRenderer.send('toggle-auto-translate', isActive),
   updateTranslationProvider: (provider) => ipcRenderer.send('update-translation-provider', provider),
   updateTranslationShortcut: (shortcut) => ipcRenderer.send('update-translation-shortcut', shortcut),
+  updateTranslationDismissSeconds: (seconds) => ipcRenderer.send('update-translation-dismiss-seconds', seconds),
   onAutoTranslateStatusChanged: (callback) => ipcRenderer.on('auto-translate-status-changed', (event, data) => callback(data)),
 
   // Schedule APIs
@@ -25,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
   onScheduleStatusChanged: (callback) => ipcRenderer.on('schedule-status-changed', (event, data) => callback(data)),
 
   // Status and log events
+  onAccessibilityStateChanged: (callback) => ipcRenderer.on('accessibility-state-changed', (event, data) => callback(data)),
   onStatusChanged: (callback) => ipcRenderer.on('status-changed', (event, data) => callback(data)),
   onSettingsChanged: (callback) => ipcRenderer.on('settings-changed-from-main', (event, data) => callback(data)),
   onLog: (callback) => ipcRenderer.on('log', (event, data) => callback(data))

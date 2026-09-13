@@ -60,6 +60,7 @@ function loadConfig() {
         translationEngine.setProvider(translationProvider);
       }
       if (parsed.translationShortcut) translationShortcut = parsed.translationShortcut;
+      if (typeof parsed.translationDismissSeconds === 'number') translationDismissSeconds = parsed.translationDismissSeconds;
       if (typeof parsed.scheduleEnabled === 'boolean') scheduleEnabled = parsed.scheduleEnabled;
       if (Array.isArray(parsed.schedules)) schedules = parsed.schedules;
     }
@@ -75,6 +76,7 @@ function saveConfig() {
       targetAppName,
       translationProvider,
       translationShortcut,
+      translationDismissSeconds,
       scheduleEnabled,
       schedules
     };
@@ -88,6 +90,7 @@ function saveConfig() {
 let isAutoTranslateActive = false;
 let arrowMonitorProc = null;
 let translationProvider = 'microsoft';
+let translationDismissSeconds = 15;
 let translationShortcut = {
   label: 'Down Arrow ↓',
   keyCode: 125,
@@ -243,7 +246,8 @@ function showTranslationHud(original, translated, provider, bounds = null, direc
     original,
     translated,
     provider,
-    direction: direction || '外文 → 中文'
+    direction: direction || '外文 → 中文',
+    dismissSeconds: translationDismissSeconds
   });
   hudWindow.showInactive();
   notifyHudFrame();
@@ -763,6 +767,16 @@ function startArrowTranslateMonitor() {
 
   arrowMonitorProc.on('exit', () => {
     arrowMonitorProc = null;
+    if (!isQuitting) {
+      const hasPermission = systemPreferences.isTrustedAccessibilityClient(false);
+      if (!hasPermission) {
+        sendToRenderer('log', {
+          msg: 'Accessibility permission was revoked. Auto-Translate daemon stopped.',
+          type: 'warning'
+        });
+        sendToRenderer('accessibility-state-changed', false);
+      }
+    }
   });
 }
 
@@ -838,6 +852,13 @@ ipcMain.on('update-translation-shortcut', (event, shortcut) => {
   if (isAutoTranslateActive) {
     startArrowTranslateMonitor();
   }
+});
+
+// IPC Handler: Synchronize translation auto-dismiss timeout (seconds)
+ipcMain.on('update-translation-dismiss-seconds', (event, seconds) => {
+  const parsed = parseInt(seconds, 10);
+  translationDismissSeconds = isNaN(parsed) ? 15 : parsed;
+  saveConfig();
 });
 
 // IPC Handlers: Schedule Management
@@ -923,6 +944,7 @@ ipcMain.handle('get-current-status', () => {
     isAutoTranslateActive,
     translationProvider,
     translationShortcut,
+    translationDismissSeconds,
     scheduleEnabled,
     schedules,
     isScheduleWindowActive: lastScheduleActiveMatched === true
@@ -930,9 +952,13 @@ ipcMain.handle('get-current-status', () => {
 });
 
 
-// IPC Handler: Check Accessibility Permission (kept for legacy support, not required for Cocoa)
+// IPC Handler: Check Accessibility Permission (on-demand check)
 ipcMain.handle('check-accessibility', () => {
-  return systemPreferences.isTrustedAccessibilityClient(false);
+  const hasPermission = systemPreferences.isTrustedAccessibilityClient(false);
+  if (hasPermission && isAutoTranslateActive && !arrowMonitorProc) {
+    startArrowTranslateMonitor();
+  }
+  return hasPermission;
 });
 
 // IPC Handler: Get running visible application names

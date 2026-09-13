@@ -194,13 +194,29 @@
         </div>
 
         <!-- Translation Engine Select -->
-        <div class="setting-group" style="margin-top: 4px; margin-bottom: 14px;">
+        <div class="setting-group" style="margin-top: 4px; margin-bottom: 12px;">
           <div class="select-header">
             <label for="translate-provider-select">Engine</label>
           </div>
           <select id="translate-provider-select" class="custom-select">
             <option value="microsoft">Microsoft Translator (Bing)</option>
             <option value="google">Google Translate</option>
+          </select>
+        </div>
+
+        <!-- Auto-Close Timeout Select -->
+        <div class="setting-group" style="margin-top: 4px; margin-bottom: 14px;">
+          <div class="select-header">
+            <label for="translate-dismiss-select">Auto-Close Delay</label>
+          </div>
+          <select id="translate-dismiss-select" class="custom-select">
+            <option value="5">5s</option>
+            <option value="10">10s</option>
+            <option value="15" selected>15s (Default)</option>
+            <option value="20">20s</option>
+            <option value="30">30s</option>
+            <option value="60">60s</option>
+            <option value="0">Never (Manual Esc)</option>
           </select>
         </div>
 

@@ -27,6 +27,7 @@ const btnOpenAccessibility = document.getElementById('btn-open-accessibility');
 const translateToggle = document.getElementById('translate-toggle');
 const translateProviderSelect = document.getElementById('translate-provider-select');
 const translateShortcutSelect = document.getElementById('translate-shortcut-select');
+const translateDismissSelect = document.getElementById('translate-dismiss-select');
 const btnRecordShortcut = document.getElementById('btn-record-shortcut');
 const shortcutRecordingBox = document.getElementById('shortcut-recording-box');
 const customShortcutOption = document.getElementById('custom-shortcut-option');
@@ -104,6 +105,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       if (status.translationProvider && translateProviderSelect) {
         translateProviderSelect.value = status.translationProvider;
+      }
+
+      if (status.translationDismissSeconds !== undefined && translateDismissSelect) {
+        translateDismissSelect.value = String(status.translationDismissSeconds);
       }
 
       // Sync Translation Shortcut
@@ -200,6 +205,17 @@ btnOpenAccessibility.addEventListener('click', () => {
 window.addEventListener('focus', async () => {
   await checkAndShowPermissionWarning();
 });
+
+if (typeof window.api !== 'undefined' && window.api.onAccessibilityStateChanged) {
+  window.api.onAccessibilityStateChanged(async (hasPermission) => {
+    if (!hasPermission) {
+      permissionWarning.classList.remove('hidden');
+    } else {
+      permissionWarning.classList.add('hidden');
+    }
+    autoFitWindow();
+  });
+}
 
 // Populate running applications in the dropdown
 async function loadRunningApps() {
@@ -780,6 +796,17 @@ if (translateProviderSelect) {
     log(`Translation engine switched to: ${val === 'microsoft' ? 'Microsoft Translator' : 'Google Translate'}`, 'system-msg');
     if (typeof window.api !== 'undefined') {
       window.api.updateTranslationProvider(val);
+    }
+  });
+}
+
+if (translateDismissSelect) {
+  translateDismissSelect.addEventListener('change', (e) => {
+    const val = parseInt(e.target.value, 10);
+    const label = val === 0 ? 'Never (Manual Esc)' : `${val}s`;
+    log(`Auto-close delay set to: ${label}`, 'system-msg');
+    if (typeof window.api !== 'undefined' && window.api.updateTranslationDismissSeconds) {
+      window.api.updateTranslationDismissSeconds(val);
     }
   });
 }
