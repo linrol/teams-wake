@@ -31,6 +31,7 @@
       "target": [
         "dmg"
       ],
+      "identity": "Teams Wake Dev",
       "icon": "assets/icon.png",
       "hardenedRuntime": false,
       "gatekeeperAssess": false
