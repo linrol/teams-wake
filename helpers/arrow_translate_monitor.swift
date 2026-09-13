@@ -232,9 +232,7 @@ DispatchQueue.global(qos: .userInitiated).async {
 
 var globalTapPort: CFMachPort?
 
-// Active event tap mask: ONLY intercept keys and right double-clicks.
-// Left mouse down/up are monitored via non-blocking NSEvent to prevent system hangs!
-var eventMask = (1 << CGEventType.keyDown.rawValue)
+var eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.leftMouseUp.rawValue)
 if isTrackpadMode {
     eventMask |= (1 << CGEventType.rightMouseDown.rawValue)
 }
@@ -324,6 +322,26 @@ guard let tap = CGEvent.tapCreate(
             return Unmanaged.passRetained(event)
         }
 
+        if type == .leftMouseDown {
+            let loc = event.location
+            lastMouseDownPoint = loc
+            if isHudVisible && Date().timeIntervalSince(hudShownTime) > 0.15 {
+                let pad: CGFloat = 4.0
+                if loc.x < (hudMinX - pad) || loc.x > (hudMaxX + pad) || loc.y < (hudMinY - pad) || loc.y > (hudMaxY + pad) {
+                    isHudVisible = false
+                    print("HUD_CLICK_OUTSIDE")
+                    fflush(stdout)
+                }
+            }
+            return Unmanaged.passRetained(event)
+        }
+
+        if type == .leftMouseUp {
+            lastMouseUpPoint = event.location
+            lastMouseUpTime = Date()
+            return Unmanaged.passRetained(event)
+        }
+
         return Unmanaged.passRetained(event)
     },
     userInfo: nil
@@ -337,26 +355,6 @@ globalTapPort = tap
 let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
 CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
 CGEvent.tapEnable(tap: tap, enable: true)
-
-// Non-blocking Passive Global Monitor for Mouse Left Down / Up:
-// Safe tracking of selection coordinates and click-outside dismissal without blocking WindowServer!
-_ = NSApplication.shared
-NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { nsEvent in
-    let loc = CGEvent(source: nil)?.location ?? .zero
-    if nsEvent.type == .leftMouseDown {
-        lastMouseDownPoint = loc
-        if isHudVisible && Date().timeIntervalSince(hudShownTime) > 0.15 {
-            if loc.x < hudMinX || loc.x > hudMaxX || loc.y < hudMinY || loc.y > hudMaxY {
-                isHudVisible = false
-                print("HUD_CLICK_OUTSIDE")
-                fflush(stdout)
-            }
-        }
-    } else if nsEvent.type == .leftMouseUp {
-        lastMouseUpPoint = loc
-        lastMouseUpTime = Date()
-    }
-}
 
 // Also listen for Trackpad Two-Finger Double-Tap (Smart Magnify) gesture
 if isTrackpadMode {
