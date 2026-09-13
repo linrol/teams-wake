@@ -154,7 +154,8 @@ function createHudWindow() {
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
-    focusable: true,
+    focusable: false,
+    type: 'panel',
     show: false,
     hasShadow: false,
     backgroundColor: '#00000000',
@@ -164,6 +165,10 @@ function createHudWindow() {
       nodeIntegration: false
     }
   });
+
+  if (process.platform === 'darwin') {
+    hudWindow.setVisibleOnAllWorkspaces(true, { visibleAcrossSpaces: true });
+  }
 
   hudWindow.loadFile('hud.html');
 

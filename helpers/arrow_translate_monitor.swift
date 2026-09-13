@@ -295,6 +295,15 @@ guard let tap = CGEvent.tapCreate(
             }
 
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+
+            // Dismiss floating HUD when user presses Escape key
+            if isHudVisible && keyCode == 53 {
+                isHudVisible = false
+                print("HUD_CLICK_OUTSIDE")
+                fflush(stdout)
+                return Unmanaged.passRetained(event)
+            }
+
             // Check for configurable Target Key
             if !isTrackpadMode && keyCode == targetKeyCode {
                 let flags = event.flags
