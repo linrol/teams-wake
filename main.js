@@ -205,7 +205,7 @@ function notifyHudClosed() {
   }
 }
 
-function showTranslationHud(original, translated, provider, bounds = null, direction = '外文 → 中文') {
+function showTranslationHud(original, translated, provider, bounds = null, direction = 'Auto → Target') {
   isHudActive = true;
   if (!hudWindow || hudWindow.isDestroyed()) {
     createHudWindow();
@@ -251,7 +251,7 @@ function showTranslationHud(original, translated, provider, bounds = null, direc
     original,
     translated,
     provider,
-    direction: direction || '外文 → 中文',
+    direction: direction || 'Auto → Target',
     dismissSeconds: translationDismissSeconds
   });
   hudWindow.showInactive();
@@ -722,7 +722,7 @@ function startArrowTranslateMonitor() {
           sendToRenderer('log', { msg: `[Translate (${currentProviderName})] -> English: "${translated}"`, type: 'success' });
 
           // Pop up HUD card with English translation and Replace / Copy buttons!
-          showTranslationHud(originalText, translated, translationEngine.getProvider(), bounds, '中文 → 英文');
+          showTranslationHud(originalText, translated, translationEngine.getProvider(), bounds, 'ZH → EN');
         } catch (err) {
           sendToRenderer('log', { msg: `[Translate Error] ${err.message}`, type: 'error' });
         }
@@ -743,10 +743,10 @@ function startArrowTranslateMonitor() {
           sendToRenderer('log', { msg: `[Translate (${currentProviderName})] Selected Message (EN->ZH): "${originalText}"`, type: 'info' });
 
           const translated = await translationEngine.translate(originalText, 'en', 'zh-CN');
-          sendToRenderer('log', { msg: `[Translate (${currentProviderName})] -> 中文: "${translated}"`, type: 'success' });
+          sendToRenderer('log', { msg: `[Translate (${currentProviderName})] -> Target: "${translated}"`, type: 'success' });
 
           // Pop up HUD card with Chinese translation and Replace / Copy buttons!
-          showTranslationHud(originalText, translated, translationEngine.getProvider(), bounds, '外文 → 中文');
+          showTranslationHud(originalText, translated, translationEngine.getProvider(), bounds, 'Auto → Target');
         } catch (err) {
           sendToRenderer('log', { msg: `[Translate Error] ${err.message}`, type: 'error' });
         }

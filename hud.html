@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 
 <head>
   <meta charset="UTF-8">
@@ -192,21 +192,21 @@
       <div class="provider-tag">
         <span class="provider-dot"></span>
         <span id="provider-name">Microsoft Translator</span>
-        <span class="lang-badge" id="lang-badge">外文 → 中文</span>
+        <span class="lang-badge" id="lang-badge">Auto → Target</span>
       </div>
     </div>
 
     <div class="hud-content">
-      <div class="translated-text" id="translated-text">正在翻译...</div>
+      <div class="translated-text" id="translated-text">Translating...</div>
     </div>
 
     <div class="hud-footer">
       <span class="original-snippet" id="original-snippet"></span>
       <div class="hud-actions">
-        <button class="btn-action btn-replace" id="btn-replace" title="用译文替换选中文本 (Enter)">
+        <button class="btn-action btn-replace" id="btn-replace" title="Replace selected text (Enter)">
           <span id="btn-replace-text">Replace</span>
         </button>
-        <button class="btn-action btn-copy" id="btn-copy" title="复制译文到剪贴板">
+        <button class="btn-action btn-copy" id="btn-copy" title="Copy translation to clipboard">
           <span id="btn-copy-text">Copy</span>
         </button>
       </div>
@@ -297,7 +297,7 @@
         translatedTextEl.textContent = currentTranslation;
         originalSnippetEl.textContent = data.original || '';
         providerNameEl.textContent = data.provider === 'google' ? 'Google Translate' : 'Microsoft Translator';
-        langBadgeEl.textContent = data.direction || '外文 → 中文';
+        langBadgeEl.textContent = data.direction || 'Auto → Target';
 
         btnCopy.classList.remove('copied');
         btnCopyText.textContent = 'Copy';
