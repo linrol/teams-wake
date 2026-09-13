@@ -170,6 +170,7 @@ function log(msg, type = 'info') {
     <span class="log-msg">${msg}</span>
   `;
   logContainer.prepend(entry);
+  autoFitWindow();
 }
 
 // Sync settings to the Main process
@@ -990,11 +991,13 @@ function autoFitWindow() {
     const activePanel = document.querySelector('.tab-panel.active');
     const panelH = activePanel ? activePanel.offsetHeight : 260;
 
-    const logCard = document.querySelector('.log-card');
-    const logH = logCard ? logCard.offsetHeight : 180;
+    // Dynamically expand with log content, capped between 240px and 360px
+    const logContainerEl = document.getElementById('log-container');
+    const logScrollH = logContainerEl ? (logContainerEl.scrollHeight + 46) : 240;
+    const logH = Math.min(Math.max(logScrollH, 240), 360);
 
     const contentHeight = Math.ceil(titleH + padTop + padBottom + navH + gap + panelH + gap + logH + 8);
-    const neededHeight = Math.max(contentHeight, 550);
+    const neededHeight = Math.max(contentHeight, 580);
 
     if (window.api && window.api.adjustWindowHeight) {
       window.api.adjustWindowHeight(neededHeight);

@@ -112,9 +112,9 @@ let contextMenu;
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 390,
-    height: 560,
+    height: 600,
     minWidth: 360,
-    minHeight: 500,
+    minHeight: 520,
     resizable: true,
     frame: false,
     titleBarStyle: 'hidden',
@@ -1058,10 +1058,8 @@ async function runWakeIteration(force = false) {
 
   const jxaScript = `
     ObjC.import('Cocoa');
+    ObjC.import('CoreGraphics');
     var workspace = $.NSWorkspace.sharedWorkspace;
-    var activeApp = workspace.frontmostApplication;
-    var activeAppName = ObjC.unwrap(activeApp.localizedName) || "Unknown";
-    
     var apps = workspace.runningApplications;
     var targetKeyword = "${targetAppName}";
     var targetApp = null;
@@ -1101,90 +1099,58 @@ async function runWakeIteration(force = false) {
         }
     }
     
-    var activated = false;
     var actionTaken = "none";
-    var foundProcessName = "";
     
     if (targetApp) {
-        var hasAccessibility = false;
         try {
-            var systemEvents = Application("System Events");
-            var p = systemEvents.processes();
-            hasAccessibility = true;
-        } catch(e) {}
+            var pid = targetApp.processIdentifier;
+            var src = $.CGEventSourceCreate($.kCGEventSourceStateHIDSystemState);
+            
+            // Post silent Escape to clear any popups/menus inside target process
+            var escDown = $.CGEventCreateKeyboardEvent(src, 53, true);
+            var escUp = $.CGEventCreateKeyboardEvent(src, 53, false);
+            $.CGEventPostToPid(pid, escDown);
+            $.CGEventPostToPid(pid, escUp);
+            $.NSThread.sleepForTimeInterval(0.1);
 
-        if (hasAccessibility) {
-            activated = targetApp.activateWithOptions($.NSApplicationActivateIgnoringOtherApps);
-            $.NSThread.sleepForTimeInterval(1.0);
-            
-            try {
-                var systemEvents = Application("System Events");
-                var processes = systemEvents.processes();
-                var targetProcess = null;
-                for (var i = 0; i < processes.length; i++) {
-                    var pName = processes[i].name();
-                    if (pName && (pName.toLowerCase().indexOf("teams") !== -1 || pName.toLowerCase().indexOf(targetKeyword.toLowerCase()) !== -1)) {
-                        targetProcess = processes[i];
-                        foundProcessName = pName;
-                        break;
-                    }
-                }
-                
-                if (targetProcess) {
-                    targetProcess.frontmost = true;
-                    $.NSThread.sleepForTimeInterval(0.5);
-                    
-                    try {
-                        var windows = targetProcess.windows();
-                        for (var w = 0; w < windows.length; w++) {
-                            if (windows[w].attributes.byName("AXMinimized").value() === true) {
-                                windows[w].attributes.byName("AXMinimized").value = false;
-                            }
-                        }
-                        $.NSThread.sleepForTimeInterval(0.5);
-                    } catch(wErr) {}
-                    
-                    // Clear any active dropdowns/modals/focus blocks (Escape key = KeyCode 53)
-                    systemEvents.keyCode(53);
-                    $.NSThread.sleepForTimeInterval(0.3);
-                    
-                    // Switch to Chat tab (Cmd + 2 - KeyCode 19 is layout-independent)
-                    // We send it twice with a delay to handle virtual desktop Space switching or window focus transition latency
-                    systemEvents.keyCode(19, { using: "command down" });
-                    $.NSThread.sleepForTimeInterval(1.0);
-                    systemEvents.keyCode(19, { using: "command down" });
-                    $.NSThread.sleepForTimeInterval(1.5);
-                    
-                    // Switch down 3 times
-                    for (var k = 0; k < 3; k++) {
-                        systemEvents.keyCode(125, { using: "option down" });
-                        $.NSThread.sleepForTimeInterval(2.0);
-                    }
-                    
-                    // Switch back up 3 times
-                    for (var k = 0; k < 3; k++) {
-                        systemEvents.keyCode(126, { using: "option down" });
-                        $.NSThread.sleepForTimeInterval(2.0);
-                    }
-                    
-                    actionTaken = "chat_switch";
-                } else {
-                    actionTaken = "wiggle_fallback_no_process";
-                }
-            } catch (e) {
-                actionTaken = "wiggle_fallback_error: " + e.message;
+            // Post silent Cmd + 2 (switch to Chat tab) directly to target PID
+            var cmdDown = $.CGEventCreateKeyboardEvent(src, 19, true);
+            $.CGEventSetFlags(cmdDown, $.kCGEventFlagMaskCommand);
+            var cmdUp = $.CGEventCreateKeyboardEvent(src, 19, false);
+            $.CGEventPostToPid(pid, cmdDown);
+            $.CGEventPostToPid(pid, cmdUp);
+            $.NSThread.sleepForTimeInterval(0.2);
+
+            // Post silent Option + Down twice directly to target PID
+            for (var k = 0; k < 2; k++) {
+                var optDown = $.CGEventCreateKeyboardEvent(src, 125, true);
+                $.CGEventSetFlags(optDown, $.kCGEventFlagMaskAlternate);
+                var optUp = $.CGEventCreateKeyboardEvent(src, 125, false);
+                $.CGEventPostToPid(pid, optDown);
+                $.CGEventPostToPid(pid, optUp);
+                $.NSThread.sleepForTimeInterval(0.1);
             }
-            
-            activeApp.activateWithOptions($.NSApplicationActivateIgnoringOtherApps);
-        } else {
-            actionTaken = "wiggle_fallback_no_accessibility";
+
+            // Post silent Option + Up twice directly to target PID
+            for (var k = 0; k < 2; k++) {
+                var optUpKey = $.CGEventCreateKeyboardEvent(src, 126, true);
+                $.CGEventSetFlags(optUpKey, $.kCGEventFlagMaskAlternate);
+                var optUpKeyRelease = $.CGEventCreateKeyboardEvent(src, 126, false);
+                $.CGEventPostToPid(pid, optUpKey);
+                $.CGEventPostToPid(pid, optUpKeyRelease);
+                $.NSThread.sleepForTimeInterval(0.1);
+            }
+
+            actionTaken = "background_events_posted";
+        } catch (e) {
+            actionTaken = "wiggle_fallback_error: " + e.message;
         }
     } else {
         actionTaken = "wiggle_fallback_no_target_app";
     }
     
-    // Fallback to Mouse Jiggle if we didn't switch chat
-    if (actionTaken !== "chat_switch") {
+    // Fallback to Mouse Jiggle if background posting wasn't possible
+    if (actionTaken !== "background_events_posted") {
         var loc = $.NSEvent.mouseLocation;
         var screenHeight = $.NSScreen.mainScreen.frame.size.height;
         var currentX = loc.x;
@@ -1203,9 +1169,6 @@ async function runWakeIteration(force = false) {
     
     var status = {
         matchedName: matchedName || targetKeyword,
-        foundProcessName: foundProcessName,
-        prevApp: activeAppName,
-        activated: activated,
         launched: launched,
         actionTaken: actionTaken
     };
@@ -1223,9 +1186,9 @@ async function runWakeIteration(force = false) {
       });
     }
 
-    if (status.actionTaken === 'chat_switch') {
+    if (status.actionTaken === 'background_events_posted') {
       sendToRenderer('log', {
-        msg: `Target app "${status.matchedName || targetAppName}" focused & chats switched successfully. Restored focus to "${status.prevApp || 'Unknown'}".`,
+        msg: `Background keep-alive signal successfully sent to "${status.matchedName || targetAppName}" (0 focus interruption).`,
         type: 'success'
       });
     } else if (status.actionTaken === 'mouse_wiggle') {
@@ -1233,20 +1196,10 @@ async function runWakeIteration(force = false) {
         msg: 'Mouse wiggled successfully to keep system active.',
         type: 'success'
       });
-    } else if (status.actionTaken === 'wiggle_fallback_no_accessibility') {
-      sendToRenderer('log', {
-        msg: `Accessibility permission missing. Performed fallback mouse jiggle to keep system awake.`,
-        type: 'warning'
-      });
     } else if (status.actionTaken.startsWith('wiggle_fallback_error:')) {
       const errMsg = status.actionTaken.replace('wiggle_fallback_error: ', '');
       sendToRenderer('log', {
-        msg: `Keystroke simulation failed (${errMsg}). Performed fallback mouse jiggle.`,
-        type: 'warning'
-      });
-    } else if (status.actionTaken === 'wiggle_fallback_no_process') {
-      sendToRenderer('log', {
-        msg: `Process for "${targetAppName}" not found. Performed fallback mouse jiggle.`,
+        msg: `Background event posting failed (${errMsg}). Performed fallback mouse jiggle.`,
         type: 'warning'
       });
     } else if (status.actionTaken === 'wiggle_fallback_no_target_app') {
