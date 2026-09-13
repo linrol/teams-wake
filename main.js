@@ -169,12 +169,32 @@ function createHudWindow() {
       hudWindow.hide();
     }
     isHudActive = false;
+    notifyHudClosed();
   });
 
   hudWindow.on('closed', () => {
     hudWindow = null;
     isHudActive = false;
+    notifyHudClosed();
   });
+}
+
+function notifyHudFrame() {
+  if (hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible() && arrowMonitorProc && arrowMonitorProc.stdin && arrowMonitorProc.stdin.writable) {
+    const [x, y] = hudWindow.getPosition();
+    const [w, h] = hudWindow.getSize();
+    try {
+      arrowMonitorProc.stdin.write(`HUD_FRAME ${x} ${y} ${w} ${h}\n`);
+    } catch (e) {}
+  }
+}
+
+function notifyHudClosed() {
+  if (arrowMonitorProc && arrowMonitorProc.stdin && arrowMonitorProc.stdin.writable) {
+    try {
+      arrowMonitorProc.stdin.write('HUD_CLOSED\n');
+    } catch (e) {}
+  }
 }
 
 function showTranslationHud(original, translated, provider, bounds = null, direction = '外文 → 中文') {
@@ -226,6 +246,7 @@ function showTranslationHud(original, translated, provider, bounds = null, direc
     direction: direction || '外文 → 中文'
   });
   hudWindow.showInactive();
+  notifyHudFrame();
 }
 
 function createTray() {
@@ -720,6 +741,12 @@ function startArrowTranslateMonitor() {
         } catch (err) {
           sendToRenderer('log', { msg: `[Translate Error] ${err.message}`, type: 'error' });
         }
+      } else if (trimmed === 'HUD_CLICK_OUTSIDE') {
+        if (hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible()) {
+          hudWindow.hide();
+        }
+        isHudActive = false;
+        notifyHudClosed();
       } else if (trimmed === 'TRANSLATE_SUCCESS') {
         sendToRenderer('log', { msg: '[Translate] Replaced in-place with English!', type: 'success' });
       } else if (trimmed === 'READY') {
@@ -858,6 +885,7 @@ ipcMain.on('hide-hud', () => {
     hudWindow.hide();
   }
   isHudActive = false;
+  notifyHudClosed();
 });
 
 ipcMain.on('replace-selection', (event, text) => {
@@ -865,6 +893,7 @@ ipcMain.on('replace-selection', (event, text) => {
     hudWindow.hide();
   }
   isHudActive = false;
+  notifyHudClosed();
 
   const outB64 = Buffer.from(text, 'utf8').toString('base64');
   if (arrowMonitorProc && arrowMonitorProc.stdin.writable) {
@@ -881,6 +910,7 @@ ipcMain.on('update-hud-height', (event, height) => {
   if (hudWindow && !hudWindow.isDestroyed()) {
     const [w] = hudWindow.getSize();
     hudWindow.setSize(w, Math.round(height));
+    notifyHudFrame();
   }
 });
 

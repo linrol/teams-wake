@@ -33,6 +33,24 @@ var isReplayingKey = false
 var lastMouseDownPoint: CGPoint = .zero
 var lastMouseUpPoint: CGPoint = .zero
 var lastMouseUpTime: Date = Date.distantPast
+var lastRightMouseDownTime: Date = Date.distantPast
+var lastRightMouseDownPoint: CGPoint = .zero
+
+// HUD Tracking for Click-Outside Dismissal
+var isHudVisible = false
+var hudMinX: CGFloat = 0
+var hudMaxX: CGFloat = 0
+var hudMinY: CGFloat = 0
+var hudMaxY: CGFloat = 0
+var hudShownTime: Date = Date.distantPast
+
+func dismissContextMenu() {
+    let src = CGEventSource(stateID: .hidSystemState)
+    let escDown = CGEvent(keyboardEventSource: src, virtualKey: 0x35, keyDown: true)
+    let escUp = CGEvent(keyboardEventSource: src, virtualKey: 0x35, keyDown: false)
+    escDown?.post(tap: .cghidEventTap)
+    escUp?.post(tap: .cghidEventTap)
+}
 
 func replayTargetKey() {
     isReplayingKey = true
@@ -81,7 +99,7 @@ func simulateCmdV() {
     postKeyCombination(virtualKey: 0x09)
 }
 
-var isTrackpadMode: Bool = (targetKeyCode == -2 || targetMods.contains("trackpad"))
+var isTrackpadMode: Bool = (targetKeyCode == -2 || targetMods.contains("trackpad") || targetMods.contains("right_double") || targetMods.contains("double"))
 
 func triggerSelectionTranslation(shouldReplayKey: Bool = false) {
     if !isTargetFrontmost() { return }
@@ -89,6 +107,9 @@ func triggerSelectionTranslation(shouldReplayKey: Bool = false) {
     let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
 
     DispatchQueue.global(qos: .userInteractive).async {
+        if isTrackpadMode {
+            usleep(35000) // 35ms delay to allow context menu dismiss
+        }
         let oldChangeCount = NSPasteboard.general.changeCount
         simulateCmdC()
 
@@ -187,6 +208,22 @@ DispatchQueue.global(qos: .userInitiated).async {
                     fflush(stdout)
                 }
             }
+        } else if trimmed.starts(with: "HUD_FRAME ") {
+            let parts = trimmed.dropFirst("HUD_FRAME ".count).split(separator: " ")
+            if parts.count >= 4,
+               let x = Double(parts[0]),
+               let y = Double(parts[1]),
+               let w = Double(parts[2]),
+               let h = Double(parts[3]) {
+                hudMinX = CGFloat(x)
+                hudMaxX = CGFloat(x + w)
+                hudMinY = CGFloat(y)
+                hudMaxY = CGFloat(y + h)
+                hudShownTime = Date()
+                isHudVisible = true
+            }
+        } else if trimmed == "HUD_CLOSED" {
+            isHudVisible = false
         }
     }
     // Parent Electron process closed stdin, exit cleanly
@@ -212,6 +249,18 @@ guard let tap = CGEvent.tapCreate(
             return nil
         }
 
+        // Check for click-outside to auto-dismiss Translation HUD
+        if isHudVisible && Date().timeIntervalSince(hudShownTime) > 0.15 {
+            if type == .leftMouseDown || type == .rightMouseDown {
+                let p = event.location
+                if p.x < hudMinX || p.x > hudMaxX || p.y < hudMinY || p.y > hudMaxY {
+                    isHudVisible = false
+                    print("HUD_CLICK_OUTSIDE")
+                    fflush(stdout)
+                }
+            }
+        }
+
         // Track drag-selection coordinates
         if type == .leftMouseDown {
             lastMouseDownPoint = event.location
@@ -227,10 +276,23 @@ guard let tap = CGEvent.tapCreate(
         // Handle Trackpad Two-Finger Double Click (Right Double-Click)
         if type == .rightMouseDown {
             if isTrackpadMode {
+                let now = Date()
+                let timeDiff = now.timeIntervalSince(lastRightMouseDownTime)
+                let dx = event.location.x - lastRightMouseDownPoint.x
+                let dy = event.location.y - lastRightMouseDownPoint.y
+                let dist = sqrt(dx * dx + dy * dy)
                 let clickCount = event.getIntegerValueField(.mouseEventClickState)
-                if clickCount == 2 {
+
+                // Trigger on macOS clickCount == 2 OR consecutive right clicks within 0.5s and 65px radius
+                if clickCount >= 2 || (timeDiff < 0.50 && dist < 65.0) {
+                    lastRightMouseDownTime = Date.distantPast
+                    lastRightMouseDownPoint = .zero
+                    dismissContextMenu()
                     triggerSelectionTranslation(shouldReplayKey: false)
                     return nil // Suppress double right-click context menu
+                } else {
+                    lastRightMouseDownTime = now
+                    lastRightMouseDownPoint = event.location
                 }
             }
             return Unmanaged.passRetained(event)
@@ -280,6 +342,7 @@ CGEvent.tapEnable(tap: tap, enable: true)
 if isTrackpadMode {
     _ = NSApplication.shared
     NSEvent.addGlobalMonitorForEvents(matching: [.smartMagnify]) { _ in
+        dismissContextMenu()
         triggerSelectionTranslation(shouldReplayKey: false)
     }
 }
