@@ -19,8 +19,14 @@ contextBridge.exposeInMainWorld('api', {
   updateTranslationShortcut: (shortcut) => ipcRenderer.send('update-translation-shortcut', shortcut),
   onAutoTranslateStatusChanged: (callback) => ipcRenderer.on('auto-translate-status-changed', (event, data) => callback(data)),
 
+  // Schedule APIs
+  getScheduleSettings: () => ipcRenderer.invoke('get-schedule-settings'),
+  updateScheduleSettings: (data) => ipcRenderer.send('update-schedule-settings', data),
+  onScheduleStatusChanged: (callback) => ipcRenderer.on('schedule-status-changed', (event, data) => callback(data)),
+
   // Status and log events
   onStatusChanged: (callback) => ipcRenderer.on('status-changed', (event, data) => callback(data)),
   onSettingsChanged: (callback) => ipcRenderer.on('settings-changed-from-main', (event, data) => callback(data)),
   onLog: (callback) => ipcRenderer.on('log', (event, data) => callback(data))
 });
+

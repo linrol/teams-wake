@@ -32,6 +32,36 @@ const shortcutRecordingBox = document.getElementById('shortcut-recording-box');
 const customShortcutOption = document.getElementById('custom-shortcut-option');
 const shortcutDescKey = document.getElementById('shortcut-desc-key');
 
+// Schedule DOM Elements & State
+const scheduleToggle = document.getElementById('schedule-toggle');
+const scheduleStatusBadge = document.getElementById('schedule-status-badge');
+const scheduleList = document.getElementById('schedule-list');
+const btnAddSchedule = document.getElementById('btn-add-schedule');
+const scheduleCollapseToggle = document.getElementById('schedule-collapse-toggle');
+const btnToggleSchedule = document.getElementById('btn-toggle-schedule');
+const scheduleBody = document.getElementById('schedule-body');
+const wakeScheduleAccessory = document.querySelector('.wake-schedule-accessory');
+
+// Tab Navigation DOM Elements
+const tabButtons = document.querySelectorAll('.tab-btn');
+const tabPanels = document.querySelectorAll('.tab-panel');
+
+let scheduleEnabled = false;
+let schedules = [];
+let isScheduleWindowActive = false;
+let activeScheduleName = null;
+
+const DAY_LABELS = [
+  { day: 1, label: 'M', title: 'Monday' },
+  { day: 2, label: 'T', title: 'Tuesday' },
+  { day: 3, label: 'W', title: 'Wednesday' },
+  { day: 4, label: 'T', title: 'Thursday' },
+  { day: 5, label: 'F', title: 'Friday' },
+  { day: 6, label: 'S', title: 'Saturday' },
+  { day: 0, label: 'S', title: 'Sunday' }
+];
+
+
 // Icons SVG Paths
 const ICON_ACTIVE = "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z";
 const ICON_INACTIVE = "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm4-9H8v2h8v-2z";
@@ -100,6 +130,18 @@ window.addEventListener('DOMContentLoaded', async () => {
           shortcutDescKey.textContent = status.translationShortcut.label;
         }
       }
+
+      // Sync Schedule Settings
+      if (status.scheduleEnabled !== undefined && scheduleToggle) {
+        scheduleEnabled = status.scheduleEnabled;
+        scheduleToggle.checked = scheduleEnabled;
+      }
+      if (Array.isArray(status.schedules)) {
+        schedules = status.schedules;
+      }
+      isScheduleWindowActive = !!status.isScheduleWindowActive;
+      renderScheduleList();
+      updateScheduleBadge();
 
       // Check accessibility permission on startup
       await checkAndShowPermissionWarning();
@@ -240,9 +282,286 @@ function updateStatusUI(activeState) {
     statusRing.classList.remove('active');
     iconPath.setAttribute('d', ICON_INACTIVE);
     statusText.textContent = 'Inactive';
-    statusSubtext.textContent = 'Wake-up is currently disabled';
+    if (scheduleEnabled) {
+      statusSubtext.textContent = 'Wake-up is currently idle (Scheduled)';
+    } else {
+      statusSubtext.textContent = 'Wake-up is currently disabled';
+    }
   }
 }
+
+function updateScheduleBadge() {
+  if (scheduleStatusBadge) {
+    scheduleStatusBadge.className = 'badge-schedule';
+    if (!scheduleEnabled) {
+      scheduleStatusBadge.classList.add('status-off');
+      scheduleStatusBadge.textContent = 'Disabled';
+    } else if (isScheduleWindowActive) {
+      scheduleStatusBadge.classList.add('status-active');
+      scheduleStatusBadge.textContent = 'Active';
+    } else {
+      scheduleStatusBadge.classList.add('status-waiting');
+      scheduleStatusBadge.textContent = 'Waiting';
+    }
+  }
+}
+
+
+function syncScheduleSettings() {
+  if (typeof window.api !== 'undefined' && window.api.updateScheduleSettings) {
+    window.api.updateScheduleSettings({
+      scheduleEnabled,
+      schedules
+    });
+  }
+}
+
+// Clean Direct Keyboard & Arrow-key Time Input (No Ugly Browser Popups)
+function formatTimeStr(val, fallback = '09:00') {
+  if (!val) return fallback;
+  val = val.trim().replace(/[^\d:]/g, '');
+  if (!val) return fallback;
+
+  // Single or double digits: e.g. "9" -> "09:00", "18" -> "18:00"
+  if (/^\d{1,2}$/.test(val)) {
+    const h = Math.min(23, Math.max(0, parseInt(val, 10)));
+    return `${String(h).padStart(2, '0')}:00`;
+  }
+  // 3 or 4 digits without colon: e.g. "930" -> "09:30", "1830" -> "18:30"
+  if (/^\d{3,4}$/.test(val)) {
+    const padded = val.padStart(4, '0');
+    let h = Math.min(23, Math.max(0, parseInt(padded.slice(0, 2), 10)));
+    let m = Math.min(59, Math.max(0, parseInt(padded.slice(2, 4), 10)));
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+  // Standard colon format: e.g. "9:30", "18:00"
+  const parts = val.split(':');
+  if (parts.length >= 2) {
+    let h = parseInt(parts[0], 10);
+    let m = parseInt(parts[1], 10);
+    if (isNaN(h)) h = 0;
+    if (isNaN(m)) m = 0;
+    h = Math.min(23, Math.max(0, h));
+    m = Math.min(59, Math.max(0, m));
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+  return fallback;
+}
+
+function createTimeInput(initialTime, onChange) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'schedule-time-input';
+  input.value = initialTime || '09:00';
+  input.placeholder = '09:00';
+  input.maxLength = 5;
+  input.spellcheck = false;
+
+  let currentVal = input.value;
+
+  const commitValue = () => {
+    const formatted = formatTimeStr(input.value, currentVal);
+    input.value = formatted;
+    if (formatted !== currentVal) {
+      currentVal = formatted;
+      onChange(formatted);
+    }
+  };
+
+  input.addEventListener('change', commitValue);
+  input.addEventListener('blur', commitValue);
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      input.blur();
+    }
+  });
+
+  return input;
+}
+
+function renderScheduleList() {
+  if (!scheduleList) return;
+  scheduleList.innerHTML = '';
+
+  if (!schedules || schedules.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'schedule-empty';
+    empty.textContent = 'No schedules configured. Click "+ Add Schedule" below.';
+    scheduleList.appendChild(empty);
+    autoFitWindow();
+    return;
+  }
+
+  schedules.forEach((schedule, index) => {
+    const item = document.createElement('div');
+    item.className = `schedule-item${!schedule.enabled ? ' is-disabled' : ''}`;
+    item.dataset.id = schedule.id;
+
+    // Header row: Name input, toggle switch, and delete button
+    const topRow = document.createElement('div');
+    topRow.className = 'schedule-item-top';
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'schedule-name-input';
+    nameInput.value = schedule.name || `Schedule ${index + 1}`;
+    nameInput.placeholder = 'Schedule Name';
+    nameInput.addEventListener('change', (e) => {
+      schedule.name = e.target.value.trim() || `Schedule ${index + 1}`;
+      syncScheduleSettings();
+    });
+
+    const controls = document.createElement('div');
+    controls.className = 'schedule-item-controls';
+
+    // Switch container
+    const switchLabel = document.createElement('label');
+    switchLabel.className = 'switch-container switch-xs';
+    const switchInput = document.createElement('input');
+    switchInput.type = 'checkbox';
+    switchInput.checked = !!schedule.enabled;
+    const sliderSpan = document.createElement('span');
+    sliderSpan.className = 'slider';
+    switchLabel.appendChild(switchInput);
+    switchLabel.appendChild(sliderSpan);
+
+    switchInput.addEventListener('change', (e) => {
+      schedule.enabled = e.target.checked;
+      if (schedule.enabled) {
+        item.classList.remove('is-disabled');
+      } else {
+        item.classList.add('is-disabled');
+      }
+      syncScheduleSettings();
+      log(`Schedule "${schedule.name}" ${schedule.enabled ? 'enabled' : 'disabled'}`, 'info');
+    });
+
+    // Delete button
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'btn-delete-schedule';
+    deleteBtn.title = 'Delete Schedule';
+    deleteBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+        <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+      </svg>
+    `;
+    deleteBtn.addEventListener('click', () => {
+      const removedName = schedule.name || 'Schedule';
+      schedules.splice(index, 1);
+      renderScheduleList();
+      syncScheduleSettings();
+      log(`Schedule "${removedName}" deleted.`, 'warning');
+    });
+
+    controls.appendChild(switchLabel);
+    controls.appendChild(deleteBtn);
+
+    topRow.appendChild(nameInput);
+    topRow.appendChild(controls);
+    item.appendChild(topRow);
+
+    // Time row: Start Time to End Time
+    const timeRow = document.createElement('div');
+    timeRow.className = 'schedule-time-row';
+
+    const startBox = document.createElement('div');
+    startBox.className = 'schedule-time-box';
+    const startLabel = document.createElement('label');
+    startLabel.textContent = 'From';
+    const startInput = createTimeInput(schedule.startTime || '09:00', (newTime) => {
+      schedule.startTime = newTime;
+      syncScheduleSettings();
+    });
+    startBox.appendChild(startLabel);
+    startBox.appendChild(startInput);
+
+    const timeSep = document.createElement('span');
+    timeSep.className = 'schedule-time-sep';
+    timeSep.textContent = '→';
+
+    const endBox = document.createElement('div');
+    endBox.className = 'schedule-time-box';
+    const endLabel = document.createElement('label');
+    endLabel.textContent = 'To';
+    const endInput = createTimeInput(schedule.endTime || '18:00', (newTime) => {
+      schedule.endTime = newTime;
+      syncScheduleSettings();
+    });
+    endBox.appendChild(endLabel);
+    endBox.appendChild(endInput);
+
+    timeRow.appendChild(startBox);
+    timeRow.appendChild(timeSep);
+    timeRow.appendChild(endBox);
+    item.appendChild(timeRow);
+
+    // Days row: Day chips + Quick actions
+    const daysRow = document.createElement('div');
+    daysRow.className = 'schedule-days-row';
+
+    const chipsContainer = document.createElement('div');
+    chipsContainer.className = 'schedule-days-chips';
+
+    DAY_LABELS.forEach(({ day, label, title }) => {
+      const chip = document.createElement('div');
+      chip.className = `day-chip${schedule.days && schedule.days.includes(day) ? ' active' : ''}`;
+      chip.textContent = label;
+      chip.title = title;
+
+      chip.addEventListener('click', () => {
+        if (!Array.isArray(schedule.days)) schedule.days = [];
+        const idx = schedule.days.indexOf(day);
+        if (idx >= 0) {
+          schedule.days.splice(idx, 1);
+          chip.classList.remove('active');
+        } else {
+          schedule.days.push(day);
+          chip.classList.add('active');
+        }
+        syncScheduleSettings();
+      });
+
+      chipsContainer.appendChild(chip);
+    });
+
+    const quickDays = document.createElement('div');
+    quickDays.className = 'schedule-quick-days';
+
+    const btnWorkdays = document.createElement('button');
+    btnWorkdays.type = 'button';
+    btnWorkdays.className = 'btn-quick-day';
+    btnWorkdays.textContent = 'Workdays';
+    btnWorkdays.addEventListener('click', () => {
+      schedule.days = [1, 2, 3, 4, 5];
+      renderScheduleList();
+      syncScheduleSettings();
+    });
+
+    const btnEveryday = document.createElement('button');
+    btnEveryday.type = 'button';
+    btnEveryday.className = 'btn-quick-day';
+    btnEveryday.textContent = 'Daily';
+    btnEveryday.addEventListener('click', () => {
+      schedule.days = [1, 2, 3, 4, 5, 6, 0];
+      renderScheduleList();
+      syncScheduleSettings();
+    });
+
+    quickDays.appendChild(btnWorkdays);
+    quickDays.appendChild(btnEveryday);
+
+    daysRow.appendChild(chipsContainer);
+    daysRow.appendChild(quickDays);
+    item.appendChild(daysRow);
+
+    scheduleList.appendChild(item);
+  });
+
+  autoFitWindow();
+}
+
 
 // App Dropdown Selection Change
 targetAppSelect.addEventListener('change', () => {
@@ -363,6 +682,86 @@ if (typeof window.api !== 'undefined') {
       }
     });
   }
+
+  if (window.api.onScheduleStatusChanged) {
+    window.api.onScheduleStatusChanged((data) => {
+      if (typeof data.scheduleEnabled === 'boolean') {
+        scheduleEnabled = data.scheduleEnabled;
+        if (scheduleToggle) scheduleToggle.checked = scheduleEnabled;
+      }
+      if (Array.isArray(data.schedules)) {
+        schedules = data.schedules;
+        renderScheduleList();
+      }
+      isScheduleWindowActive = !!data.isScheduleWindowActive;
+      activeScheduleName = data.activeScheduleName || null;
+      updateScheduleBadge();
+      updateStatusUI(isActive);
+    });
+  }
+}
+
+// Schedule Drawer Collapse / Expand Engine
+function toggleScheduleDrawer(forceOpen) {
+  if (!scheduleBody || !wakeScheduleAccessory) return;
+  const isCurrentlyCollapsed = scheduleBody.classList.contains('collapsed');
+  const shouldOpen = forceOpen !== undefined ? forceOpen : isCurrentlyCollapsed;
+
+  if (shouldOpen) {
+    scheduleBody.classList.remove('collapsed');
+    wakeScheduleAccessory.classList.add('expanded');
+  } else {
+    scheduleBody.classList.add('collapsed');
+    wakeScheduleAccessory.classList.remove('expanded');
+  }
+  autoFitWindow();
+}
+
+if (scheduleCollapseToggle) {
+  scheduleCollapseToggle.addEventListener('click', (e) => {
+    if (e.target.closest('.switch-container')) return;
+    toggleScheduleDrawer();
+  });
+}
+
+if (btnToggleSchedule) {
+  btnToggleSchedule.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleScheduleDrawer();
+  });
+}
+
+// Auto Schedule Event Listeners
+if (scheduleToggle) {
+  scheduleToggle.addEventListener('change', (e) => {
+    scheduleEnabled = e.target.checked;
+    updateScheduleBadge();
+    syncScheduleSettings();
+    log(`Auto Schedule ${scheduleEnabled ? 'ENABLED' : 'DISABLED'}`, scheduleEnabled ? 'success' : 'warning');
+    updateStatusUI(isActive);
+    if (scheduleEnabled) {
+      toggleScheduleDrawer(true);
+    }
+  });
+}
+
+if (btnAddSchedule) {
+  btnAddSchedule.addEventListener('click', () => {
+    const newId = 'sched_' + Date.now();
+    const newIndex = schedules.length + 1;
+    const newSched = {
+      id: newId,
+      name: `Schedule ${newIndex}`,
+      enabled: true,
+      startTime: '09:00',
+      endTime: '18:00',
+      days: [1, 2, 3, 4, 5]
+    };
+    schedules.push(newSched);
+    renderScheduleList();
+    syncScheduleSettings();
+    log(`Added new schedule: "${newSched.name}" (09:00 - 18:00, Mon-Fri)`, 'info');
+  });
 }
 
 // Auto-Translate Event Listeners
@@ -373,6 +772,7 @@ if (translateToggle) {
     }
   });
 }
+
 
 if (translateProviderSelect) {
   translateProviderSelect.addEventListener('change', (e) => {
@@ -513,6 +913,35 @@ function handleKeyRecord(e) {
   stopRecordingShortcut();
 }
 
+// Tab Navigation Engine
+function switchTab(targetTabId) {
+  tabButtons.forEach(btn => {
+    if (btn.dataset.tab === targetTabId) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+
+  tabPanels.forEach(panel => {
+    if (panel.id === targetTabId) {
+      panel.classList.add('active');
+    } else {
+      panel.classList.remove('active');
+    }
+  });
+
+  autoFitWindow();
+}
+
+tabButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    switchTab(btn.dataset.tab);
+  });
+});
+
+
+
 // Window Height Auto-Adaptation Engine
 let autoFitTimer = null;
 function autoFitWindow() {
@@ -524,27 +953,27 @@ function autoFitWindow() {
 
     const titleH = titleBar.offsetHeight || 38;
     const containerStyle = window.getComputedStyle(container);
-    const padTop = parseFloat(containerStyle.paddingTop) || 12;
-    const padBottom = parseFloat(containerStyle.paddingBottom) || 14;
-    const gap = parseFloat(containerStyle.gap) || 10;
+    const padTop = parseFloat(containerStyle.paddingTop) || 14;
+    const padBottom = parseFloat(containerStyle.paddingBottom) || 16;
+    const gap = parseFloat(containerStyle.gap) || 12;
 
-    let cardsHeight = 0;
-    const children = Array.from(container.children);
-    let visibleCount = 0;
-    children.forEach((el) => {
-      if (el.offsetParent !== null || el.offsetHeight > 0) {
-        cardsHeight += el.offsetHeight;
-        visibleCount++;
-      }
-    });
+    const tabNav = document.querySelector('.tab-nav');
+    const navH = tabNav ? tabNav.offsetHeight : 38;
 
-    const gapsTotal = visibleCount > 1 ? (visibleCount - 1) * gap : 0;
-    const neededHeight = Math.ceil(titleH + padTop + padBottom + cardsHeight + gapsTotal + 6);
+    const activePanel = document.querySelector('.tab-panel.active');
+    const panelH = activePanel ? activePanel.offsetHeight : 260;
+
+    const logCard = document.querySelector('.log-card');
+    const logH = logCard ? logCard.offsetHeight : 180;
+
+    const contentHeight = Math.ceil(titleH + padTop + padBottom + navH + gap + panelH + gap + logH + 8);
+    const neededHeight = Math.max(contentHeight, 550);
 
     if (window.api && window.api.adjustWindowHeight) {
       window.api.adjustWindowHeight(neededHeight);
     }
   }, 40);
 }
+
 
 

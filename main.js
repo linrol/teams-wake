@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, systemPreferences, shell, powerMonitor } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const translationEngine = require('./translationEngine');
 
@@ -19,6 +20,70 @@ let targetAppName = 'Microsoft Teams';
 let timerId = null;
 let startupTimeoutId = null;
 
+// Schedule configuration and state
+const configFilePath = path.join(app.getPath('userData'), 'settings.json');
+
+const DEFAULT_SCHEDULES = [
+  {
+    id: 'workday-morning',
+    name: 'Morning Session',
+    enabled: true,
+    startTime: '09:00',
+    endTime: '12:00',
+    days: [1, 2, 3, 4, 5]
+  },
+  {
+    id: 'workday-afternoon',
+    name: 'Afternoon Session',
+    enabled: true,
+    startTime: '13:30',
+    endTime: '18:00',
+    days: [1, 2, 3, 4, 5]
+  }
+];
+
+let scheduleEnabled = false;
+let schedules = DEFAULT_SCHEDULES;
+let scheduleCheckerTimer = null;
+let lastScheduleActiveMatched = null;
+let manualOverrideActive = null;
+
+function loadConfig() {
+  try {
+    if (fs.existsSync(configFilePath)) {
+      const data = fs.readFileSync(configFilePath, 'utf8');
+      const parsed = JSON.parse(data);
+      if (typeof parsed.intervalMinutes === 'number') intervalMinutes = parsed.intervalMinutes;
+      if (parsed.targetAppName) targetAppName = parsed.targetAppName;
+      if (parsed.translationProvider) {
+        translationProvider = parsed.translationProvider;
+        translationEngine.setProvider(translationProvider);
+      }
+      if (parsed.translationShortcut) translationShortcut = parsed.translationShortcut;
+      if (typeof parsed.scheduleEnabled === 'boolean') scheduleEnabled = parsed.scheduleEnabled;
+      if (Array.isArray(parsed.schedules)) schedules = parsed.schedules;
+    }
+  } catch (err) {
+    console.error('Failed to load settings:', err);
+  }
+}
+
+function saveConfig() {
+  try {
+    const config = {
+      intervalMinutes,
+      targetAppName,
+      translationProvider,
+      translationShortcut,
+      scheduleEnabled,
+      schedules
+    };
+    fs.writeFileSync(configFilePath, JSON.stringify(config, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save settings:', err);
+  }
+}
+
 // Auto-Translate state
 let isAutoTranslateActive = false;
 let arrowMonitorProc = null;
@@ -31,6 +96,9 @@ let translationShortcut = {
 let isHudActive = false;
 let lastFrontmostPid = null;
 
+// Load persisted settings immediately
+loadConfig();
+
 
 // Path to system tray status PNG icons
 const inactiveIconPath = path.join(__dirname, 'assets', 'iconTemplate.png');
@@ -40,10 +108,10 @@ let contextMenu;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 380,
-    height: 650,
-    minWidth: 340,
-    minHeight: 480,
+    width: 390,
+    height: 560,
+    minWidth: 360,
+    minHeight: 500,
     resizable: true,
     frame: false,
     titleBarStyle: 'hidden',
@@ -188,7 +256,25 @@ function updateTrayMenu() {
       type: 'checkbox',
       checked: isActive,
       click: (menuItem) => {
-        toggleWakeState(menuItem.checked);
+        toggleWakeState(menuItem.checked, true);
+      }
+    },
+    {
+      label: 'Auto Schedule',
+      type: 'checkbox',
+      checked: scheduleEnabled,
+      click: (menuItem) => {
+        scheduleEnabled = menuItem.checked;
+        saveConfig();
+        manualOverrideActive = null;
+        lastScheduleActiveMatched = null;
+        evaluateSchedules();
+        updateTrayMenu();
+        sendToRenderer('schedule-status-changed', {
+          scheduleEnabled,
+          schedules,
+          isScheduleWindowActive: lastScheduleActiveMatched === true
+        });
       }
     },
     {
@@ -239,6 +325,7 @@ function updateTrayMenu() {
 
 function updateIntervalAndSync(newInterval) {
   intervalMinutes = newInterval;
+  saveConfig();
   sendToRenderer('settings-changed-from-main', { intervalMinutes, targetAppName });
   if (isActive) {
     if (timerId) clearTimeout(timerId);
@@ -273,7 +360,15 @@ async function isTargetAppRunning() {
 }
 
 // Global state controller to turn Keep-Alive ON/OFF
-async function toggleWakeState(enabled) {
+async function toggleWakeState(enabled, isManual = false) {
+  if (isManual && scheduleEnabled) {
+    manualOverrideActive = enabled;
+    sendToRenderer('log', {
+      msg: `[Schedule] Manual override: Smart Wake switched ${enabled ? 'ON' : 'OFF'}. Auto-schedule will hold until next period transition.`,
+      type: 'info'
+    });
+  }
+
   if (isActive === enabled) return;
 
   if (enabled) {
@@ -308,6 +403,7 @@ async function toggleWakeState(enabled) {
   }
 
   isActive = enabled;
+
 
   // Dynamically swap the tray icon based on status
   const { nativeImage } = require('electron');
@@ -362,6 +458,104 @@ function sendToRenderer(channel, data) {
   }
 }
 
+function checkScheduleMatch(schedule, date) {
+  if (!schedule || !schedule.enabled) return false;
+  if (!schedule.startTime || !schedule.endTime) return false;
+  if (!Array.isArray(schedule.days) || schedule.days.length === 0) return false;
+
+  const day = date.getDay(); // 0: Sun, 1: Mon, ..., 6: Sat
+  const [sH, sM] = schedule.startTime.split(':').map(Number);
+  const [eH, eM] = schedule.endTime.split(':').map(Number);
+  if (isNaN(sH) || isNaN(sM) || isNaN(eH) || isNaN(eM)) return false;
+
+  const startMins = sH * 60 + sM;
+  const endMins = eH * 60 + eM;
+  const currentMins = date.getHours() * 60 + date.getMinutes();
+
+  if (startMins < endMins) {
+    // Normal interval on the same day (e.g. 09:00 - 18:00)
+    if (!schedule.days.includes(day)) return false;
+    return currentMins >= startMins && currentMins < endMins;
+  } else if (startMins > endMins) {
+    // Crosses midnight (e.g. 22:00 - 06:00)
+    if (currentMins >= startMins) {
+      return schedule.days.includes(day);
+    }
+    if (currentMins < endMins) {
+      const yesterday = (day + 6) % 7;
+      return schedule.days.includes(yesterday);
+    }
+    return false;
+  }
+  return false;
+}
+
+function evaluateSchedules() {
+  if (!scheduleEnabled) {
+    lastScheduleActiveMatched = null;
+    manualOverrideActive = null;
+    sendToRenderer('schedule-status-changed', {
+      scheduleEnabled: false,
+      schedules,
+      isScheduleWindowActive: false,
+      activeScheduleName: null
+    });
+    return;
+  }
+
+  const now = new Date();
+  let matchedSchedule = null;
+
+  for (const s of schedules) {
+    if (checkScheduleMatch(s, now)) {
+      matchedSchedule = s;
+      break;
+    }
+  }
+
+  const shouldBeActive = matchedSchedule !== null;
+
+  if (lastScheduleActiveMatched !== shouldBeActive) {
+    // Boundary transition occurred
+    manualOverrideActive = null;
+    lastScheduleActiveMatched = shouldBeActive;
+
+    if (shouldBeActive) {
+      if (!isActive) {
+        sendToRenderer('log', {
+          msg: `[Schedule] Auto-started Smart Wake via "${matchedSchedule.name || 'Schedule'}" (${matchedSchedule.startTime} - ${matchedSchedule.endTime})`,
+          type: 'success'
+        });
+        toggleWakeState(true, false);
+      }
+    } else {
+      if (isActive) {
+        sendToRenderer('log', {
+          msg: '[Schedule] Auto-stopped Smart Wake: active schedule period ended.',
+          type: 'info'
+        });
+        toggleWakeState(false, false);
+      }
+    }
+  } else {
+    // Same state period: if no manual override active, ensure status matches
+    if (manualOverrideActive === null) {
+      if (shouldBeActive && !isActive) {
+        toggleWakeState(true, false);
+      } else if (!shouldBeActive && isActive) {
+        toggleWakeState(false, false);
+      }
+    }
+  }
+
+  sendToRenderer('schedule-status-changed', {
+    scheduleEnabled: true,
+    schedules,
+    isScheduleWindowActive: shouldBeActive,
+    activeScheduleName: matchedSchedule ? (matchedSchedule.name || 'Schedule') : null
+  });
+}
+
 app.whenReady().then(() => {
   if (process.platform === 'darwin') {
     app.dock.setIcon(path.join(__dirname, 'assets', 'icon.png'));
@@ -369,6 +563,11 @@ app.whenReady().then(() => {
   createTray();
   createWindow();
   createHudWindow();
+
+  // Run initial schedule evaluation and schedule background checker
+  evaluateSchedules();
+  if (scheduleCheckerTimer) clearInterval(scheduleCheckerTimer);
+  scheduleCheckerTimer = setInterval(evaluateSchedules, 15000);
 
   app.on('activate', (event, hasVisibleWindows) => {
     // If HUD is active or if there are already visible windows, do NOT pop up mainWindow
@@ -397,6 +596,7 @@ app.whenReady().then(() => {
     if (isAutoTranslateActive) {
       startArrowTranslateMonitor();
     }
+    evaluateSchedules();
   });
 });
 
@@ -420,6 +620,10 @@ app.on('before-quit', () => {
   if (timerId) {
     clearTimeout(timerId);
     timerId = null;
+  }
+  if (scheduleCheckerTimer) {
+    clearInterval(scheduleCheckerTimer);
+    scheduleCheckerTimer = null;
   }
 });
 
@@ -548,6 +752,7 @@ function stopArrowTranslateMonitor() {
 ipcMain.on('settings-changed', (event, settings) => {
   intervalMinutes = settings.interval;
   targetAppName = settings.targetApp;
+  saveConfig();
 
   // If timer is already running, restart it with new interval
   if (isActive) {
@@ -563,7 +768,7 @@ ipcMain.on('settings-changed', (event, settings) => {
 
 // IPC Handler: Synchronize active toggle state from the UI checkbox
 ipcMain.on('toggle-active', (event, activeState) => {
-  toggleWakeState(activeState);
+  toggleWakeState(activeState, true);
 });
 
 function toggleAutoTranslateState(activeState) {
@@ -596,13 +801,40 @@ ipcMain.on('toggle-auto-translate', (event, activeState) => {
 ipcMain.on('update-translation-provider', (event, provider) => {
   translationProvider = provider;
   translationEngine.setProvider(provider);
+  saveConfig();
 });
 
 // IPC Handler: Synchronize translation shortcut
 ipcMain.on('update-translation-shortcut', (event, shortcut) => {
   translationShortcut = shortcut;
+  saveConfig();
   if (isAutoTranslateActive) {
     startArrowTranslateMonitor();
+  }
+});
+
+// IPC Handlers: Schedule Management
+ipcMain.handle('get-schedule-settings', () => {
+  return {
+    scheduleEnabled,
+    schedules,
+    isScheduleWindowActive: lastScheduleActiveMatched === true
+  };
+});
+
+ipcMain.on('update-schedule-settings', (event, data) => {
+  if (data) {
+    if (typeof data.scheduleEnabled === 'boolean') {
+      scheduleEnabled = data.scheduleEnabled;
+    }
+    if (Array.isArray(data.schedules)) {
+      schedules = data.schedules;
+    }
+    saveConfig();
+    manualOverrideActive = null;
+    lastScheduleActiveMatched = null;
+    evaluateSchedules();
+    updateTrayMenu();
   }
 });
 
@@ -613,7 +845,7 @@ ipcMain.on('adjust-window-height', (event, neededHeight) => {
     const [currentWidth, currentHeight] = mainWindow.getSize();
     const display = screen.getDisplayNearestPoint(mainWindow.getBounds());
     const maxHeight = display.workAreaSize.height - 40;
-    const targetHeight = Math.min(Math.max(Math.round(neededHeight), 480), maxHeight);
+    const targetHeight = Math.min(Math.max(Math.round(neededHeight), 500), maxHeight);
     if (Math.abs(currentHeight - targetHeight) > 3) {
       mainWindow.setSize(currentWidth, targetHeight);
     }
@@ -660,9 +892,13 @@ ipcMain.handle('get-current-status', () => {
     targetAppName,
     isAutoTranslateActive,
     translationProvider,
-    translationShortcut
+    translationShortcut,
+    scheduleEnabled,
+    schedules,
+    isScheduleWindowActive: lastScheduleActiveMatched === true
   };
 });
+
 
 // IPC Handler: Check Accessibility Permission (kept for legacy support, not required for Cocoa)
 ipcMain.handle('check-accessibility', () => {

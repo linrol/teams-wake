@@ -12,135 +12,199 @@
 <body>
   <!-- Custom Title Bar for macOS (draggable) -->
   <header class="title-bar">
-    <div class="title-text">Teams Wake</div>
+    <div class="title-brand">
+      <span class="title-text">Teams Wake</span>
+      <span class="title-version">v1.0.4</span>
+    </div>
     <div class="title-controls">
       <button id="btn-minimize" class="title-btn" title="Hide to Tray">−</button>
     </div>
   </header>
 
   <main class="app-container">
-    <!-- Accessibility Permission Warning -->
-    <section id="permission-warning" class="card permission-card hidden">
-      <span class="permission-icon">⚠️</span>
-      <div class="permission-content">
-        <h4>Accessibility Permission Required</h4>
-        <p>Auto-switching chats requires Accessibility permission. Enable it in macOS System Settings.</p>
-        <button id="btn-open-accessibility" class="btn-primary"
-          style="margin-top: 4px; padding: 6px 12px; align-self: flex-start; background: var(--accent-warning); color: #12161e;">Open
-          Settings</button>
-      </div>
-    </section>
+    <!-- Top Tab Navigation Bar -->
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="panel-wake" type="button">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+          <path d="M7 2v11h3v9l7-12h-4l4-8z"/>
+        </svg>
+        <span>Smart Wake</span>
+      </button>
+      <button class="tab-btn" data-tab="panel-translate" type="button">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+          <path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v1.99h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+        </svg>
+        <span>Auto-Translate</span>
+      </button>
+    </nav>
 
-    <!-- Smart Wake Unified Card -->
-    <section id="status-panel" class="card wake-card">
-      <div class="card-header-with-toggle">
-        <div class="status-left">
-          <div id="status-ring" class="status-badge">
-            <svg class="status-icon" viewBox="0 0 24 24">
-              <path id="icon-path"
-                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm4-9H8v2h8v-2z"
-                fill="currentColor" />
-            </svg>
+    <!-- TAB 1: Smart Wake Panel -->
+    <div id="panel-wake" class="tab-panel active">
+      <!-- Accessibility Permission Warning -->
+      <section id="permission-warning" class="card permission-card hidden">
+        <span class="permission-icon">⚠️</span>
+        <div class="permission-content">
+          <h4>Accessibility Permission Required</h4>
+          <p>Auto-switching chats requires Accessibility permission. Enable it in macOS System Settings.</p>
+          <button id="btn-open-accessibility" class="btn-primary"
+            style="margin-top: 4px; padding: 6px 12px; align-self: flex-start; background: var(--accent-warning); color: #12161e;">Open
+            Settings</button>
+        </div>
+      </section>
+
+      <!-- Smart Wake Unified Card -->
+      <section id="status-panel" class="card wake-card">
+        <div class="card-header-with-toggle">
+          <div class="status-left">
+            <div id="status-ring" class="status-badge">
+              <svg class="status-icon" viewBox="0 0 24 24">
+                <path id="icon-path"
+                  d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm4-9H8v2h8v-2z"
+                  fill="currentColor" />
+              </svg>
+            </div>
+            <div class="status-info">
+              <h2 id="status-text" class="status-title">Inactive</h2>
+              <p id="status-subtext" class="status-subtitle">Wake-up is currently disabled</p>
+            </div>
           </div>
-          <div class="status-info">
-            <h2 id="status-text" class="status-title">Inactive</h2>
-            <p id="status-subtext" class="status-subtitle">Wake-up is currently disabled</p>
+          <div class="status-right">
+            <label class="switch-container switch-md">
+              <input type="checkbox" id="wake-toggle">
+              <span class="slider"></span>
+            </label>
           </div>
         </div>
-        <div class="status-right">
-          <label class="switch-container switch-md">
-            <input type="checkbox" id="wake-toggle">
+
+        <!-- Target Application Input -->
+        <div class="setting-group" id="target-app-group">
+          <div class="select-header">
+            <label for="target-app-select">Target App</label>
+            <button id="btn-refresh-apps" class="btn-text" type="button">Refresh</button>
+          </div>
+          <select id="target-app-select" class="custom-select">
+            <option value="Microsoft Teams">Microsoft Teams</option>
+            <option value="custom">-- Custom App Name --</option>
+          </select>
+          <input type="text" id="target-app" class="hidden" value="Microsoft Teams"
+            placeholder="Type custom application name">
+        </div>
+
+        <!-- Interval Slider -->
+        <div class="setting-group" style="margin-bottom: 12px;">
+          <div class="slider-label-container">
+            <label for="interval-slider">Interval (Minutes)</label>
+            <span id="interval-val" class="badge">3 min</span>
+          </div>
+          <input type="range" id="interval-slider" min="1" max="10" value="3" step="1">
+          <div class="slider-ticks">
+            <span>1m</span>
+            <span>3m</span>
+            <span>5m</span>
+            <span>8m</span>
+            <span>10m</span>
+          </div>
+        </div>
+
+        <!-- Auto Schedule Accessory Section (Sub-feature of Smart Wake) -->
+        <div class="wake-schedule-accessory">
+          <div class="schedule-accessory-header" id="schedule-collapse-toggle">
+            <div class="header-left">
+              <span class="schedule-icon">⏰</span>
+              <div class="schedule-header-text">
+                <span class="schedule-title">Auto Schedule</span>
+                <span id="schedule-status-badge" class="badge-schedule status-off">Disabled</span>
+              </div>
+            </div>
+            <div class="header-right">
+              <label class="switch-container switch-xs" title="Toggle Auto Schedule" onclick="event.stopPropagation();">
+                <input type="checkbox" id="schedule-toggle">
+                <span class="slider"></span>
+              </label>
+              <button id="btn-toggle-schedule" type="button" class="btn-collapse" title="Expand / Collapse Schedules">
+                <svg id="schedule-chevron" class="chevron-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                  <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Collapsible body -->
+          <div id="schedule-body" class="schedule-accessory-body collapsed">
+            <div id="schedule-list" class="schedule-list">
+              <!-- Dynamic schedule items rendered by renderer.js -->
+            </div>
+
+            <button id="btn-add-schedule" type="button" class="btn-add-schedule">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+              </svg>
+              <span>Add Schedule</span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- TAB 2: Translate Panel -->
+    <div id="panel-translate" class="tab-panel">
+      <section class="card settings-card auto-translate-card">
+        <div class="card-header-with-toggle">
+          <h3>Auto-Translate</h3>
+          <label class="switch-container switch-sm">
+            <input type="checkbox" id="translate-toggle">
             <span class="slider"></span>
           </label>
         </div>
-      </div>
 
-      <!-- Target Application Input -->
-      <div class="setting-group" id="target-app-group">
-        <div class="select-header">
-          <label for="target-app-select">Target App</label>
-          <button id="btn-refresh-apps" class="btn-text" type="button">Refresh</button>
+        <!-- Shortcut Configuration -->
+        <div class="setting-group" style="margin-top: 10px; margin-bottom: 14px;">
+          <div class="select-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <label for="translate-shortcut-select">Shortcut</label>
+            <button id="btn-record-shortcut" type="button" class="badge" style="cursor: pointer; background: rgba(0,255,213,0.12); color: var(--accent-active); border: 1px solid rgba(0,255,213,0.3); border-radius: 4px; font-size: 11px; padding: 2px 7px; transition: all 0.2s ease;">Record</button>
+          </div>
+          <select id="translate-shortcut-select" class="custom-select">
+            <option value='{"label":"Down Arrow ↓","keyCode":125,"modifiers":"none"}'>Down Arrow ↓ (Default)</option>
+            <option value='{"label":"Space","keyCode":49,"modifiers":"none"}'>Space</option>
+            <option value='{"label":"Double Click","keyCode":-2,"modifiers":"trackpad_double"}'>Double Click</option>
+            <option value='{"label":"⌥ D (Option + D)","keyCode":2,"modifiers":"alt"}'>⌥ D (Option + D)</option>
+            <option value='{"label":"⌥ T (Option + T)","keyCode":17,"modifiers":"alt"}'>⌥ T (Option + T)</option>
+            <option value='{"label":"⌥ Space","keyCode":49,"modifiers":"alt"}'>⌥ Space (Option + Space)</option>
+            <option value='{"label":"⌃ Space","keyCode":49,"modifiers":"ctrl"}'>⌃ Space (Control + Space)</option>
+            <option value='{"label":"⌘ ⌥ D","keyCode":2,"modifiers":"cmd+alt"}'>⌘ ⌥ D (Command + Option + D)</option>
+            <option value='{"label":"F1","keyCode":122,"modifiers":"none"}'>F1</option>
+            <option value='{"label":"F2","keyCode":120,"modifiers":"none"}'>F2</option>
+            <option value='{"label":"F4","keyCode":118,"modifiers":"none"}'>F4</option>
+            <option id="custom-shortcut-option" value="" style="display: none;"></option>
+          </select>
+          <div id="shortcut-recording-box" style="display: none; margin-top: 6px; padding: 7px 10px; background: rgba(0,255,213,0.08); border: 1px dashed var(--accent-active); border-radius: 6px; font-size: 11px; text-align: center; color: var(--text-main);">
+            <span id="recording-prompt">Press any key or shortcut combination... <span style="color:var(--text-muted); font-size:10px;">(Esc to cancel)</span></span>
+          </div>
         </div>
-        <select id="target-app-select" class="custom-select">
-          <option value="Microsoft Teams">Microsoft Teams</option>
-          <option value="custom">-- Custom App Name --</option>
-        </select>
-        <input type="text" id="target-app" class="hidden" value="Microsoft Teams"
-          placeholder="Type custom application name">
-      </div>
 
-      <!-- Interval Slider -->
-      <div class="setting-group" style="margin-bottom: 0;">
-        <div class="slider-label-container">
-          <label for="interval-slider">Interval (Minutes)</label>
-          <span id="interval-val" class="badge">3 min</span>
+        <!-- Translation Engine Select -->
+        <div class="setting-group" style="margin-top: 4px; margin-bottom: 14px;">
+          <div class="select-header">
+            <label for="translate-provider-select">Engine</label>
+          </div>
+          <select id="translate-provider-select" class="custom-select">
+            <option value="microsoft">Microsoft Translator (Bing)</option>
+            <option value="google">Google Translate</option>
+          </select>
         </div>
-        <input type="range" id="interval-slider" min="1" max="10" value="3" step="1">
-        <div class="slider-ticks">
-          <span>1m</span>
-          <span>3m</span>
-          <span>5m</span>
-          <span>8m</span>
-          <span>10m</span>
-        </div>
-      </div>
-    </section>
 
-    <!-- Auto-Translate Card -->
-    <section class="card settings-card auto-translate-card">
-      <div class="card-header-with-toggle">
-        <h3>Auto-Translate</h3>
-        <label class="switch-container switch-sm">
-          <input type="checkbox" id="translate-toggle">
-          <span class="slider"></span>
-        </label>
-      </div>
+        <p class="card-description" style="margin-top: 6px;">Select text anywhere and press <strong id="shortcut-desc-key" style="color: var(--accent-active);">Down Arrow ↓</strong> to translate.</p>
+      </section>
+    </div>
 
-
-      <!-- Shortcut Configuration -->
-      <div class="setting-group" style="margin-top: 8px; margin-bottom: 8px;">
-        <div class="select-header" style="display: flex; justify-content: space-between; align-items: center;">
-          <label for="translate-shortcut-select">Shortcut</label>
-          <button id="btn-record-shortcut" type="button" class="badge" style="cursor: pointer; background: rgba(0,255,213,0.12); color: var(--accent-active); border: 1px solid rgba(0,255,213,0.3); border-radius: 4px; font-size: 11px; padding: 2px 7px; transition: all 0.2s ease;">Record</button>
-        </div>
-        <select id="translate-shortcut-select" class="custom-select">
-          <option value='{"label":"Down Arrow ↓","keyCode":125,"modifiers":"none"}'>Down Arrow ↓ (Default)</option>
-          <option value='{"label":"Space","keyCode":49,"modifiers":"none"}'>Space</option>
-          <option value='{"label":"Double Click","keyCode":-2,"modifiers":"trackpad_double"}'>Double Click</option>
-          <option value='{"label":"⌥ D (Option + D)","keyCode":2,"modifiers":"alt"}'>⌥ D (Option + D)</option>
-          <option value='{"label":"⌥ T (Option + T)","keyCode":17,"modifiers":"alt"}'>⌥ T (Option + T)</option>
-          <option value='{"label":"⌥ Space","keyCode":49,"modifiers":"alt"}'>⌥ Space (Option + Space)</option>
-          <option value='{"label":"⌃ Space","keyCode":49,"modifiers":"ctrl"}'>⌃ Space (Control + Space)</option>
-          <option value='{"label":"⌘ ⌥ D","keyCode":2,"modifiers":"cmd+alt"}'>⌘ ⌥ D (Command + Option + D)</option>
-          <option value='{"label":"F1","keyCode":122,"modifiers":"none"}'>F1</option>
-          <option value='{"label":"F2","keyCode":120,"modifiers":"none"}'>F2</option>
-          <option value='{"label":"F4","keyCode":118,"modifiers":"none"}'>F4</option>
-          <option id="custom-shortcut-option" value="" style="display: none;"></option>
-        </select>
-        <div id="shortcut-recording-box" style="display: none; margin-top: 6px; padding: 7px 10px; background: rgba(0,255,213,0.08); border: 1px dashed var(--accent-active); border-radius: 6px; font-size: 11px; text-align: center; color: var(--text-main);">
-          <span id="recording-prompt">Press any key or shortcut combination... <span style="color:var(--text-muted); font-size:10px;">(Esc to cancel)</span></span>
-        </div>
-      </div>
-
-      <!-- Translation Engine Select -->
-      <div class="setting-group" style="margin-top: 8px; margin-bottom: 8px;">
-        <div class="select-header">
-          <label for="translate-provider-select">Engine</label>
-        </div>
-        <select id="translate-provider-select" class="custom-select">
-          <option value="microsoft">Microsoft Translator (Bing)</option>
-          <option value="google">Google Translate</option>
-        </select>
-      </div>
-
-      <p class="card-description">Select text anywhere and press <strong id="shortcut-desc-key" style="color: var(--accent-active);">Down Arrow ↓</strong> to translate.</p>
-    </section>
-
-    <!-- Activity Log Card -->
+    <!-- Activity Log Card (Always visible at the bottom across all tabs) -->
     <section class="card log-card">
       <div class="log-header">
-        <h3>Activity Log</h3>
-        <button id="btn-clear-log" class="btn-text">Clear</button>
+        <div class="log-title-group">
+          <span class="log-live-dot"></span>
+          <h3>Activity Log</h3>
+        </div>
+        <button id="btn-clear-log" class="btn-clear" type="button">Clear</button>
       </div>
       <div id="log-container" class="log-container">
         <div class="log-entry system-msg">
