@@ -17,8 +17,13 @@ struct TeamsWakeApp: App {
         MenuBarExtra {
             MenuBarPopup()
         } label: {
-            let iconName = appState.isActive ? "bolt.circle.fill" : "bolt.circle"
-            Image(systemName: iconName)
+            if appState.isActive {
+                Image(systemName: "bolt.circle.fill")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Color.white, Color.green)
+            } else {
+                Image(systemName: "bolt.circle")
+            }
         }
         .menuBarExtraStyle(.window)
     }
