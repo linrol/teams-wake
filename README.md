@@ -1,110 +1,53 @@
-# Teams Wake ☕
+# Teams Wake 2.0 ⚡
 
-[![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Electron](https://img.shields.io/badge/electron-v31-brightgreen.svg)](https://www.electronjs.org/)
+[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey.svg)](https://www.apple.com/macos/)
+[![Language](https://img.shields.io/badge/language-Swift%206-orange.svg)](https://swift.org)
+[![Framework](https://img.shields.io/badge/framework-AppKit%20%7C%20SwiftUI-blue.svg)](https://developer.apple.com/xcode/swiftui/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**Teams Wake** 是一款专为 macOS 设计的轻量级、高阶拟物感桌面实用工具。旨在防止 Microsoft Teams（及其他办公软件）因系统空闲而自动变更为“离开”或“忙碌”状态。
+**Teams Wake 2.0** 是一款专为 macOS 设计的极致轻量、纯原生状态栏效率工具。
+提供 **硬件级防休眠保活** 与 **全局划词智能翻译覆写** 双核心能力。
 
-> **🚀 核心特色：智能防打扰 & 智能退避**
-> 应用基于 macOS 原生 JXA (JavaScript for Automation) 以及 Cocoa API 实现，独创 **Smart Wake (智能唤醒)** 机制，仅在系统真正空闲（用户离开）时运行，支持自动唤醒、自动取消最小化，且支持无缝降级保护。
-
----
-
-## ✨ 功能特性
-
-- **智能防打扰检测 (Smart Idle Detection)**：
-  - 应用会自动检测系统空闲时间。只有当您离开电脑的时间**大于或等于设定的时间间隔**时，才会触发唤醒指令。
-  - 只要检测到您正在使用电脑，唤醒操作就会自动退避，绝不干扰您的正常打字与工作流程。
-  - 智能修复了模拟键盘输入导致 macOS 空闲计数归零、进而引发判定抖动的技术问题。
-- **统一的 Smart Wake 智能唤醒模式**：
-  - **首选模式（聊天窗口切换）**：自动唤醒 Microsoft Teams（支持将最小化的 Teams 窗口恢复），并切换到“聊天 (Chats)”标签页，以慢速（间隔 2.0s）在最近的 3 个聊天窗口中进行往返切换，并在操作完成后**瞬间恢复您离开前的前台应用焦点**。
-  - **降级模式（鼠标微抖动）**：若 Microsoft Teams 未运行，或应用未获得系统“辅助功能”权限，将自动无缝降级为系统级鼠标微小抖动（自动向右下角移动 2 像素并瞬间复原），确保在受限环境下依然能保持系统活跃。
-- **前置启用校验与引导**：
-  - 必须确保 Microsoft Teams 处于运行状态且开启了 macOS “辅助功能”权限方可启用 Smart Wake 服务。
-  - UI 界面中置有直观的“辅助功能权限警告卡片”，支持一键跳转至系统的“隐私与安全性 -> 辅助功能”设置页面。
-- **高颜值毛玻璃 UI**：深度适配 macOS Design Guidelines，提供毛玻璃（Vibrancy）半透明暗色背景、呼吸状态光圈以及逆序排版（最新在最前）、可滑动的实时控制台日志。
-- **状态栏快捷控制 (Mac Menu Bar)**：
-  - 点击右上角状态栏的 **☕ 咖啡杯** 图标可拉起原生功能菜单。
-  - 支持在状态栏直接“一键开关服务”、“调节间隔时间 (1m/3m/5m/8m/10m)”。
-  - 状态栏操作与主窗口双向实时同步。
-- **全新 Auto-Translate 自动划词翻译（方向下键 `↓`）**：
-  - 在 Microsoft Teams 输入框中输入中文后，**选中文字直接按下键盘方向下键 `↓`**，系统原生 Swift 守护进程将以毫秒级拦截并将内容发送至翻译引擎，并在光标处**原位无缝替换为英文**；
-  - **全新支持微软翻译（Microsoft Edge / Bing）与谷歌翻译（Google Translate）双引擎**：默认搭载极致超快响应的 Microsoft Edge 原生通道（~180ms 毫秒级返回，HTTP Keep-Alive 连接池复用），免任何 API Key，开箱即用；
-  - **双引擎毫秒级无感知容灾互备（Failover）**：任一翻译通道发生限流或异常时自动无缝降级重试，彻底告别 429 报错；
-  - **UI 引擎下拉选择**：在 Auto-Translate 面板中自由切换 Microsoft 或 Google 引擎；
-  - 若未选中文字或不是中文，下方向键保持常规移动光标，不影响日常打字操作。
-- **全新一体化 Hero 卡片与紧凑排版**：
-  - 状态指示与唤醒配置合二为一，窗口尺寸优化至最适宜的 380×550 黄金比例；
-  - 底部的 Activity Log 自动伸展，默认完整清晰呈现，消除冗余大块留白。
-- **低功耗省电与休眠保护 (Green Energy)**：
-  - 强制限制使用低功耗核显，彻底避免双显卡 MacBook 唤醒独立显卡造成的电量飙升；
-  - 实时监听 macOS 合盖与睡眠状态（`powerMonitor`），合盖放入背包时彻底静默休眠，开盖无感自恢复；
-  - 去除高频循环重绘的 CSS 动画，优化毛玻璃合成开销。
-- **彻底修复系统关机阻塞 Bug**：
-  - 规范接入 `before-quit` 生命周期，日常点击关闭依然隐蔽常驻托盘，系统关机/重启时毫秒放行，绝不再阻碍 macOS 关机。
-- **极简托盘驻留**：点击窗口最小化或关闭时自动隐藏至托盘后台运行，不占用 Dock 栏。
+> **🚀 架构进化：彻底告别 Electron**
+> 全新 2.0 版本采用纯 **Swift + SwiftUI + AppKit** 重构，二进制体积缩减至 **820 KB**（缩减 99.5%），内存常驻仅 **~60 MB**，CPU **0%**，真正实现零负载后台静默守护。
 
 ---
 
-## 📸 界面预览
+## ✨ 核心特性
 
-- **未激活状态**：高阶灰静谧一体式 Hero 设计。
-- **激活状态**：精致圆角徽章常驻高亮微光，伴随实时 keep-alive 执行日志（最新日志置顶，支持滑动查看完整历史）。
-- **状态栏快捷菜单**：☕ 图标在 macOS 深浅色主题下自适应反色，菜单选项丰富，操作一步到位。
+### 1. 硬件级保活与定时计划
+- **硬件级 IOHID 时钟清零**：通过直接读取 macOS 内核 `IOHIDSystem` 的 `HIDIdleTime`，并在空闲超过阈值时注入 1 像素瞬移微移动，使办公软件（Teams、Slack、飞书等）持续保持 Active 状态；
+- **定时保活计划**：支持预设工作时段（如 `09:00 - 12:00`、`13:30 - 18:00`），并支持随时新增、删除自定义保活时段。工作时间内自动保活，下班后自动静默让电脑自然休眠；
+- **空闲周期无级可调**：支持在 1 ~ 10 分钟之间自由配置检测周期。
 
----
-
-## 📦 快速安装 (DMG)
-
-您可以直接下载并安装已编译好的独立 DMG 安装包：
-
-1. **下载安装包**：前往 **[GitHub Releases 页面](https://github.com/linrol/teams-wake/releases/latest)** 下载最新的 **[Teams.Wake-1.0.6.dmg](https://github.com/linrol/teams-wake/releases/download/v1.0.6/Teams.Wake-1.0.6.dmg)**（若下载缓慢，亦可直接访问 [Release v1.0.6 详情页](https://github.com/linrol/teams-wake/releases/tag/v1.0.6)）。
-2. **拖拽安装**：双击打开 `.dmg` 文件，将 **Teams Wake** 拖入系统的 **Applications (应用程序)** 目录中。
-3. **打开使用**：在 Launchpad 或应用程序目录中打开它，即可在系统右上角菜单栏看到 ☕ 图标开始使用。
+### 2. 划词自动翻译与一键覆写
+- **全局快捷唤起**：在任意软件中划选文本，按下快捷键（默认 `空格键`，或 `向下键 ↓`、`触控板/鼠标右键双击`、`⌥ D` 等 11 种预设）即可毫秒级唤起翻译浮窗；
+- **极速免 Key 双引擎**：搭载极速 Microsoft Edge 专线通道（~150ms 极速响应）并支持 Google Translate 自动降级容灾；
+- **一键原位替换**：点击「替换」或按下 `Enter` 键，译文直接平滑覆盖原编辑框中的选中内容，无需手动复制粘贴；
+- **毛玻璃自适应浮窗**：浮窗尺寸根据文本长短智能伸缩（短句小巧精致，长文自然展开并支持滚轮），支持 30% ~ 100% 透明度无级调节。
 
 ---
 
-## 🛠️ 本地开发与编译
+## 🛠️ 本地构建与安装
 
-如果您希望克隆仓库进行二次开发或本地运行：
+项目使用 Apple 官方标准 **Swift Package Manager (SPM)** 构建，无需安装 Node.js、Electron 或任何外部依赖：
 
-### 1. 克隆仓库与安装依赖
+### 1. 一键安装到系统「应用程序」
 ```bash
-git clone https://gitee.com/linrol/teams-wake.git
-cd teams-wake
-npm install
+./scripts/install.sh
 ```
+*自动编译 Release 架构、完成代码签名并安装至 `/Applications/TeamsWake.app`，开箱即用。*
 
-### 2. 本地调试运行
+### 2. 制作标准 macOS DMG 安装包
 ```bash
-npm start
+./scripts/create_dmg.sh
 ```
+*生成标准的拖拽式安装镜像：`dist/TeamsWake-2.0.0.dmg`。*
 
-### 3. 打包生成发布版 (.app & .dmg)
+### 3. 本地调试编译
 ```bash
-npm run dist
+swift build
 ```
-打包输出的文件将位于 `./dist` 目录中。
-
----
-
-## 📝 技术细节说明
-
-### 系统空闲与唤醒原理
-
-很多类似软件需要获得 macOS 的“辅助功能”权限，因为它们通过模拟键盘按键或直接干预系统输入来工作。
-
-**Teams Wake** 采用两阶段的智能唤醒策略：
-
-1. **系统空闲判定**：
-   通过调用 macOS 的 `IOHIDSystem` 原生接口获取当前用户已空闲的时间（`HIDIdleTime`）。若空闲时间小于设定的间隔阈值（例如 1 分钟/60 秒），说明用户正在使用电脑，程序立即退避，不进行任何模拟操作。
-2. **智能唤醒指令（JXA & System Events）**：
-   若判定系统处于空闲状态：
-   - 首先利用 `NSWorkspace` 寻找并激活 Microsoft Teams（若窗口最小化，会自动执行 de-minimize 恢复显示）。
-   - 通过系统 `System Events` 发送 `Cmd+2` 切换至聊天视图，并通过 `Option+Down/Up` 进行聊天频道切换。
-   - 执行完毕后，利用 `NSWorkspace` 的 `activateWithOptions` 瞬间将焦点还原至用户之前的活动应用，完成无感静默唤醒。
-   - 如果用户尚未授予“辅助功能”权限，应用会自动退避并无缝降级为普通的鼠标相对坐标位移抖动（通过 CGWarpMouseCursorPosition 瞬间移动并复原，此操作无需辅助功能权限）。
 
 ---
 

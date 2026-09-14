@@ -25,7 +25,10 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-# Node / Electron build artifacts
-node_modules/
+# Swift build artifacts
+.build/
+.swiftpm/
+
+# Dist artifacts
 dist/
 *.log

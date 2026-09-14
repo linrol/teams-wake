@@ -1,8 +1,8 @@
 const { spawn, exec } = require('child_process');
 
 /**
- * 获取 macOS 系统当前的 HIDIdleTime（单位：秒）
- * 对应 Electron 内部 powerMonitor.getSystemIdleTime() 的底层实现
+ * Get macOS system current HIDIdleTime (in seconds)
+ * Matches Electron internal powerMonitor.getSystemIdleTime() implementation
  */
 function getSystemIdleTime() {
   return new Promise((resolve) => {
@@ -18,7 +18,7 @@ function getSystemIdleTime() {
 }
 
 /**
- * 执行微移动（利用 CoreGraphics 触发真实的 kCGEventMouseMoved 硬件级输入事件）
+ * Perform micro wiggle (inject kCGEventMouseMoved hardware-level input events via CoreGraphics)
  */
 function performMicroWiggle() {
   return new Promise((resolve, reject) => {
@@ -34,14 +34,14 @@ function performMicroWiggle() {
       var pt1 = $.CGPointMake(currentX + 1, currentY + 1);
       var pt2 = $.CGPointMake(currentX, currentY);
 
-      // 1. 瞬移 1 像素并向驱动注入真实鼠标移动事件
+      // 1. Move 1px and post real mouse moved event
       $.CGWarpMouseCursorPosition(pt1);
       var ev1 = $.CGEventCreateMouseEvent(null, $.kCGEventMouseMoved, pt1, 0);
       $.CGEventPost($.kCGHIDEventTap, ev1);
 
       $.NSThread.sleepForTimeInterval(0.02);
 
-      // 2. 立即瞬移回原位，肉眼完全无感
+      // 2. Immediately move back to original coordinates
       $.CGWarpMouseCursorPosition(pt2);
       var ev2 = $.CGEventCreateMouseEvent(null, $.kCGEventMouseMoved, pt2, 0);
       $.CGEventPost($.kCGHIDEventTap, ev2);
@@ -63,7 +63,7 @@ function performMicroWiggle() {
   });
 }
 
-// 统计分钟计数器
+// Minute counter
 let minuteCount = 0;
 const RESET_INTERVAL_MINUTES = 6;
 
@@ -72,40 +72,40 @@ async function runCheckIteration() {
   const timeStr = new Date().toLocaleTimeString();
   const currentIdle = await getSystemIdleTime();
 
-  // 判断是否到达第 6 分钟复位周期
+  // Check if 6th minute reset cycle reached
   if (minuteCount % RESET_INTERVAL_MINUTES === 0) {
     try {
       await performMicroWiggle();
-      await new Promise((r) => setTimeout(r, 100)); // 等待 100ms 内核注册表刷新
+      await new Promise((r) => setTimeout(r, 100)); // Wait 100ms for kernel registry refresh
       const afterIdle = await getSystemIdleTime();
 
       console.log(
-        `[${timeStr}] (第 ${minuteCount} 分钟 ⚡触发复位) 移动前空闲: ${currentIdle.toFixed(2)}s  ➔  移动后空闲: ${afterIdle.toFixed(2)}s (✔ 成功归零)`
+        `[${timeStr}] (Minute ${minuteCount} ⚡Reset Triggered) Before: ${currentIdle.toFixed(2)}s  ➔  After: ${afterIdle.toFixed(2)}s (✔ Reset)`
       );
     } catch (err) {
-      console.error(`[${timeStr}] 移动复位失败:`, err.message);
+      console.error(`[${timeStr}] Micro-wiggle failed:`, err.message);
     }
   } else {
-    // 普通分钟周期：仅查询并打印当前的空闲时间
+    // Normal interval: query and log current idle time
     const remainingMins = RESET_INTERVAL_MINUTES - (minuteCount % RESET_INTERVAL_MINUTES);
     console.log(
-      `[${timeStr}] (第 ${minuteCount} 分钟) 当前空闲时间: ${currentIdle.toFixed(2)}s (距离下次复位还剩: ${remainingMins} 分钟)`
+      `[${timeStr}] (Minute ${minuteCount}) Current idle: ${currentIdle.toFixed(2)}s (Next reset in: ${remainingMins} min)`
     );
   }
 }
 
 console.log('==================================================================');
-console.log('  macOS powerMonitor.getSystemIdleTime() 监控与 6min 复位脚本');
-console.log('  - 输出频率：每 1 分钟打印一次当前系统空闲时间');
-console.log('  - 复位频率：每 6 分钟真正触发一次内核硬件级空闲时钟清零');
-console.log('  - 观察建议：静置鼠标不要动，观察空闲时间持续增长并在第 6 分钟被清零');
+console.log('  macOS powerMonitor.getSystemIdleTime() Monitor & 6min Reset Script');
+console.log('  - Interval: Log current system idle time every 1 minute');
+console.log('  - Reset: Trigger hardware idle clock reset every 6 minutes');
+console.log('  - Advice: Leave mouse untouched to verify idle time accumulation and reset');
 console.log('==================================================================\n');
 
-// 启动时立即打印当前空闲时间作为基准（第 0 分钟）
+// Print baseline idle time upon launch (Minute 0)
 (async () => {
   const initIdle = await getSystemIdleTime();
-  console.log(`[${new Date().toLocaleTimeString()}] (初始状态) 当前空闲时间: ${initIdle.toFixed(2)}s\n`);
+  console.log(`[${new Date().toLocaleTimeString()}] (Initial) Current idle time: ${initIdle.toFixed(2)}s\n`);
 })();
 
-// 每 1 分钟检查一次
+// Run check every 1 minute
 setInterval(runCheckIteration, 60 * 1000);
