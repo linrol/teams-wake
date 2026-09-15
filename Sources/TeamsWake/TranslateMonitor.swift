@@ -18,34 +18,49 @@ public final class TranslateMonitor {
     private var lastRightMouseDownPoint: CGPoint = .zero
 
     // Shortcut configuration cache
-    private var targetKeyCode: Int64 = 125
+    private var targetKeyCode: Int64 = 49
     private var targetMods: String = "none"
     private var requireCmd: Bool = false
     private var requireAlt: Bool = false
     private var requireCtrl: Bool = false
     private var requireShift: Bool = false
     private var isRightClickMode: Bool = false
+    private var isSingleKeyMode: Bool = true
+    public var isDetecting: Bool = false
+    private var currentTranslationTask: Task<Void, Never>?
 
     private init() {}
 
-    public func restartMonitoring() {
+    public func restartMonitoring(with shortcut: TranslationShortcut? = nil) {
         stopMonitoring()
-        startMonitoring()
+        startMonitoring(with: shortcut)
     }
 
-    public func startMonitoring() {
+    public func syncShortcutConfig(with shortcut: TranslationShortcut) {
+        self.targetKeyCode = shortcut.keyCode
+        self.targetMods = shortcut.modifiers.lowercased()
+        self.requireCmd = self.targetMods.contains("cmd")
+        self.requireAlt = self.targetMods.contains("alt") || self.targetMods.contains("opt")
+        self.requireCtrl = self.targetMods.contains("ctrl")
+        self.requireShift = self.targetMods.contains("shift")
+        self.isRightClickMode = (self.targetKeyCode == -2 || self.targetMods.contains("right_double") || self.targetMods.contains("double"))
+        self.isSingleKeyMode = !self.isRightClickMode && !self.requireCmd && !self.requireAlt && !self.requireCtrl && !self.requireShift
+    }
+
+    public func startMonitoring(with shortcut: TranslationShortcut? = nil) {
         guard !isMonitoring else { return }
 
-        // Sync shortcut configuration
-        Task { @MainActor in
-            let sc = AppState.shared.translationShortcut
-            self.targetKeyCode = sc.keyCode
-            self.targetMods = sc.modifiers.lowercased()
-            self.requireCmd = self.targetMods.contains("cmd")
-            self.requireAlt = self.targetMods.contains("alt") || self.targetMods.contains("opt")
-            self.requireCtrl = self.targetMods.contains("ctrl")
-            self.requireShift = self.targetMods.contains("shift")
-            self.isRightClickMode = (self.targetKeyCode == -2 || self.targetMods.contains("right_double") || self.targetMods.contains("double"))
+        // Sync shortcut configuration without triggering deadlocks
+        if let sc = shortcut {
+            self.syncShortcutConfig(with: sc)
+        } else if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                self.syncShortcutConfig(with: AppState.shared.translationShortcut)
+            }
+        } else {
+            Task { @MainActor in
+                self.syncShortcutConfig(with: AppState.shared.translationShortcut)
+            }
         }
 
         var mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.leftMouseDown.rawValue)
@@ -64,7 +79,7 @@ public final class TranslateMonitor {
                     if let port = TranslateMonitor.shared.eventTap {
                         CGEvent.tapEnable(tap: port, enable: true)
                     }
-                    return nil
+                    return Unmanaged.passUnretained(event)
                 }
 
                 // Dismiss HUD when clicking outside (do not dismiss when clicking inside HUD so buttons trigger properly)
@@ -84,7 +99,7 @@ public final class TranslateMonitor {
                             }
                         }
                     }
-                    return Unmanaged.passRetained(event)
+                    return Unmanaged.passUnretained(event)
                 }
 
                 // Handle right double click / trackpad two-finger double tap
@@ -107,14 +122,13 @@ public final class TranslateMonitor {
                             TranslateMonitor.shared.lastRightMouseDownPoint = event.location
                         }
                     }
-                    return Unmanaged.passRetained(event)
+                    return Unmanaged.passUnretained(event)
                 }
 
                 if type == .keyDown {
                     // Pass through if currently replaying previously intercepted key
                     if TranslateMonitor.shared.isReplayingKey {
-                        TranslateMonitor.shared.isReplayingKey = false
-                        return Unmanaged.passRetained(event)
+                        return Unmanaged.passUnretained(event)
                     }
 
                     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
@@ -146,11 +160,16 @@ public final class TranslateMonitor {
                         let m = TranslateMonitor.shared
                         if hasCmd == m.requireCmd && hasAlt == m.requireAlt && hasCtrl == m.requireCtrl && hasShift == m.requireShift {
                             guard let frontApp = NSWorkspace.shared.frontmostApplication else {
-                                return Unmanaged.passRetained(event)
+                                return Unmanaged.passUnretained(event)
                             }
                             let name = frontApp.localizedName?.lowercased() ?? ""
                             if name.contains("teamswake") || name.contains("teams wake") {
-                                return Unmanaged.passRetained(event)
+                                return Unmanaged.passUnretained(event)
+                            }
+
+                            // If already detecting, pass through immediately to avoid typing lag
+                            if TranslateMonitor.shared.isDetecting {
+                                return Unmanaged.passUnretained(event)
                             }
 
                             TranslateMonitor.shared.handleTrigger(shouldReplay: true)
@@ -159,7 +178,7 @@ public final class TranslateMonitor {
                     }
                 }
 
-                return Unmanaged.passRetained(event)
+                return Unmanaged.passUnretained(event)
             },
             userInfo: nil
         ) else {
@@ -179,6 +198,7 @@ public final class TranslateMonitor {
         guard isMonitoring else { return }
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
         }
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
@@ -188,49 +208,91 @@ public final class TranslateMonitor {
         self.isMonitoring = false
     }
 
+    /// Synchronously query currently focused UI element for selected text via macOS Accessibility API (< 1ms)
+    public static func getSelectedTextViaAccessibility() -> String? {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedAppVal: AnyObject?
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppVal) == .success,
+              let focusedApp = focusedAppVal else {
+            return nil
+        }
+
+        let appElement = focusedApp as! AXUIElement
+        var focusedElementVal: AnyObject?
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElementVal) == .success,
+              let focusedElement = focusedElementVal else {
+            return nil
+        }
+
+        let element = focusedElement as! AXUIElement
+        var selectedTextVal: AnyObject?
+        if AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selectedTextVal) == .success,
+           let str = selectedTextVal as? String {
+            let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return nil
+    }
+
+    public func triggerDirectTranslation(text: String, frontPid: pid_t) {
+        currentTranslationTask?.cancel()
+        currentTranslationTask = Task {
+            do {
+                let provider = await AppState.shared.translationProvider
+                let res = try await TranslationEngine.shared.translate(text: text, provider: provider)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    TranslationHudController.shared.show(
+                        original: text,
+                        translated: res.result,
+                        direction: res.direction,
+                        provider: res.actualProvider,
+                        targetPid: frontPid
+                    )
+                    AppState.shared.addLog(message: "[Translation (\(res.actualProvider))] \"\(text.prefix(20))...\" ➔ \"\(res.result.prefix(20))...\"", type: .info)
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    AppState.shared.addLog(message: "Translation failed: \(error.localizedDescription)", type: .error)
+                }
+            }
+        }
+    }
+
     private func handleTrigger(shouldReplay: Bool) {
         let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
         triggerSelectionTranslation(frontPid: frontPid, shouldReplay: shouldReplay)
     }
 
     private func triggerSelectionTranslation(frontPid: pid_t, shouldReplay: Bool) {
+        guard !isDetecting else { return }
+        isDetecting = true
+
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            defer {
+                self?.isDetecting = false
+            }
+
             let oldChangeCount = NSPasteboard.general.changeCount
             self?.simulateCmdC()
 
             let start = Date()
             var detectedNewText = false
-            while Date().timeIntervalSince(start) < 0.22 {
+            while Date().timeIntervalSince(start) < 0.10 {
                 if NSPasteboard.general.changeCount != oldChangeCount {
                     detectedNewText = true
                     break
                 }
-                usleep(5000)
+                usleep(10_000)
             }
 
             if detectedNewText, let rawStr = NSPasteboard.general.string(forType: .string) {
                 let trimmed = rawStr.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
-                    Task {
-                        do {
-                            let provider = await AppState.shared.translationProvider
-                            let res = try await TranslationEngine.shared.translate(text: trimmed, provider: provider)
-                            await MainActor.run {
-                                TranslationHudController.shared.show(
-                                    original: trimmed,
-                                    translated: res.result,
-                                    direction: res.direction,
-                                    provider: res.actualProvider,
-                                    targetPid: frontPid
-                                )
-                                AppState.shared.addLog(message: "[Translation (\(res.actualProvider))] \"\(trimmed.prefix(20))...\" ➔ \"\(res.result.prefix(20))...\"", type: .info)
-                            }
-                        } catch {
-                            await MainActor.run {
-                                AppState.shared.addLog(message: "Translation failed: \(error.localizedDescription)", type: .error)
-                            }
-                        }
-                    }
+                    self?.triggerDirectTranslation(text: trimmed, frontPid: frontPid)
                     return
                 }
             }
@@ -257,11 +319,11 @@ public final class TranslateMonitor {
         modUp?.flags = []
 
         modDown?.post(tap: .cghidEventTap)
-        usleep(15_000)
+        usleep(10_000)
         cDown?.post(tap: .cghidEventTap)
-        usleep(25_000)
-        cUp?.post(tap: .cghidEventTap)
         usleep(15_000)
+        cUp?.post(tap: .cghidEventTap)
+        usleep(10_000)
         modUp?.post(tap: .cghidEventTap)
     }
 
@@ -280,6 +342,11 @@ public final class TranslateMonitor {
         up?.flags = flag
 
         down?.post(tap: .cghidEventTap)
+        usleep(3_000)
         up?.post(tap: .cghidEventTap)
+
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.isReplayingKey = false
+        }
     }
 }

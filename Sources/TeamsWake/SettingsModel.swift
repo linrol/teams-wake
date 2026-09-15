@@ -114,7 +114,7 @@ public final class AppState: ObservableObject {
                 defaults.set(data, forKey: keyTranslationShortcut)
             }
             if isAutoTranslateActive {
-                TranslateMonitor.shared.restartMonitoring()
+                TranslateMonitor.shared.restartMonitoring(with: translationShortcut)
             }
             addLog(message: "Translation shortcut updated to: \(translationShortcut.label)", type: .info)
         }
@@ -196,9 +196,12 @@ public final class AppState: ObservableObject {
         setupScheduleMonitoring()
         addLog(message: "Teams Wake native daemon ready", type: .info)
 
-        if isAutoTranslateActive && hasAccessibilityPermission {
-            TranslateMonitor.shared.startMonitoring()
-            addLog(message: "Auto translation monitor activated on launch (Shortcut: \(translationShortcut.label))", type: .info)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if self.isAutoTranslateActive && self.hasAccessibilityPermission {
+                TranslateMonitor.shared.startMonitoring(with: self.translationShortcut)
+                self.addLog(message: "Auto translation monitor activated on launch (Shortcut: \(self.translationShortcut.label))", type: .info)
+            }
         }
     }
 
@@ -214,7 +217,7 @@ public final class AppState: ObservableObject {
 
     private func handleAutoTranslateChanged() {
         if isAutoTranslateActive {
-            TranslateMonitor.shared.startMonitoring()
+            TranslateMonitor.shared.startMonitoring(with: translationShortcut)
             addLog(message: "Auto translation service started (Trigger shortcut: \(translationShortcut.label))", type: .success)
         } else {
             TranslateMonitor.shared.stopMonitoring()
