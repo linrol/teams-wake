@@ -30,14 +30,17 @@ public final class KeepAliveEngine {
         return Double(nanoseconds) / 1_000_000_000.0
     }
 
-    /// Perform a 1-pixel micro-movement to reset IOHIDSystem idle time and restore within 20ms
+    /// Perform a 1-pixel micro-movement to reset IOHIDSystem idle time and restore within 10ms
+    /// Uses native CoreGraphics coordinates directly to ensure flawless multi-monitor / external display compatibility
     @discardableResult
     public func performMicroWiggle() -> Bool {
-        let loc = NSEvent.mouseLocation
-        let screenHeight = NSScreen.main?.frame.size.height ?? 1080.0
-        let currentY = screenHeight - loc.y
-        let pt1 = CGPoint(x: loc.x + 1, y: currentY + 1)
-        let pt2 = CGPoint(x: loc.x, y: currentY)
+        // Direct CoreGraphics global physical coordinates (native multi-monitor support, zero offset drift)
+        guard let currentLoc = CGEvent(source: nil)?.location else {
+            return false
+        }
+
+        let pt1 = CGPoint(x: currentLoc.x + 1, y: currentLoc.y)
+        let pt2 = currentLoc
 
         // 1. Move cursor 1 pixel and post mouse move event to HID event tap
         CGWarpMouseCursorPosition(pt1)
@@ -45,10 +48,10 @@ public final class KeepAliveEngine {
             ev1.post(tap: .cghidEventTap)
         }
 
-        // 2. Sleep 20ms
-        usleep(20_000)
+        // 2. Sleep 10ms
+        usleep(10_000)
 
-        // 3. Immediately restore cursor position
+        // 3. Immediately restore cursor position to original physical point
         CGWarpMouseCursorPosition(pt2)
         if let ev2 = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: pt2, mouseButton: .left) {
             ev2.post(tap: .cghidEventTap)
