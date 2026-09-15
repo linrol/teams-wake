@@ -138,7 +138,7 @@ public final class TranslationHudController: NSObject {
         dismissTimer = nil
         speechSynthesizer?.stopSpeaking()
 
-        let isZh = original.range(of: "\\p{Han}", options: .regularExpression) != nil
+        let isZh = TranslationEngine.isChineseDominant(original)
         model.original = original
         model.translated = ""
         model.direction = isZh ? "ZH ➔ EN" : "EN ➔ ZH"

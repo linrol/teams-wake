@@ -21,8 +21,33 @@ public actor TranslationEngine {
 
     private init() {}
 
+    /// Determines whether the text should be primarily treated as Chinese based on weighted character density
+    /// Chinese ideographs have roughly 2.8x higher semantic density than Latin letters
+    public static func isChineseDominant(_ text: String) -> Bool {
+        var hanCount = 0
+        var latinCount = 0
+
+        for scalar in text.unicodeScalars {
+            // CJK Unified Ideographs (0x4E00...0x9FFF) and Extension A (0x3400...0x4DBF)
+            if (0x4E00...0x9FFF).contains(scalar.value) || (0x3400...0x4DBF).contains(scalar.value) {
+                hanCount += 1
+            } else if (0x0041...0x005A).contains(scalar.value) || (0x0061...0x007A).contains(scalar.value) {
+                latinCount += 1
+            }
+        }
+
+        // No Chinese at all -> English/Foreign dominant
+        guard hanCount > 0 else { return false }
+        // Has Chinese and no Latin -> pure Chinese
+        guard latinCount > 0 else { return true }
+
+        // An average English word contains ~5 characters.
+        // 1 Chinese character roughly corresponds to 2.5-3 Latin characters in semantic weight.
+        return Double(hanCount) * 2.8 >= Double(latinCount)
+    }
+
     public func containsChinese(_ text: String) -> Bool {
-        return text.range(of: "\\p{Han}", options: .regularExpression) != nil
+        return TranslationEngine.isChineseDominant(text)
     }
 
     /// Main translation entry point with automatic fallback and bidirectional Chinese-English translation
@@ -30,7 +55,7 @@ public actor TranslationEngine {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return ("", "ZH ➔ EN", provider.displayName) }
 
-        let isZh = containsChinese(trimmed)
+        let isZh = TranslationEngine.isChineseDominant(trimmed)
         let fromLang = isZh ? "zh-Hans" : "en"
         let toLang = isZh ? "en" : "zh-Hans"
         let directionLabel = isZh ? "ZH ➔ EN" : "EN ➔ ZH"
