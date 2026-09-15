@@ -51,11 +51,20 @@ public actor TranslationEngine {
     }
 
     /// Main translation entry point with automatic fallback and bidirectional Chinese-English translation
-    public func translate(text: String, provider: TranslationProvider = .microsoft) async throws -> (result: String, direction: String, actualProvider: String) {
+    public func translate(
+        text: String,
+        provider: TranslationProvider = .microsoft,
+        forcedDirection: String? = nil
+    ) async throws -> (result: String, direction: String, actualProvider: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return ("", "ZH ➔ EN", provider.displayName) }
 
-        let isZh = TranslationEngine.isChineseDominant(trimmed)
+        let isZh: Bool
+        if let forced = forcedDirection {
+            isZh = (forced == "ZH ➔ EN")
+        } else {
+            isZh = TranslationEngine.isChineseDominant(trimmed)
+        }
         let fromLang = isZh ? "zh-Hans" : "en"
         let toLang = isZh ? "en" : "zh-Hans"
         let directionLabel = isZh ? "ZH ➔ EN" : "EN ➔ ZH"

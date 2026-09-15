@@ -292,31 +292,41 @@ public final class TranslateMonitor {
 
     private var lastText: String = ""
     private var lastFrontPid: pid_t = 0
+    private var lastForcedDirection: String? = nil
 
     public func cancelCurrentTranslation() {
         currentTranslationTask?.cancel()
         currentTranslationTask = nil
     }
 
-    public func retryTranslation() {
+    @MainActor
+    public func toggleDirectionAndRetranslate() {
         guard !lastText.isEmpty else { return }
-        triggerDirectTranslation(text: lastText, frontPid: lastFrontPid)
+        let currentDirection = TranslationHudController.shared.model.direction
+        let newDirection = (currentDirection == "ZH ➔ EN") ? "EN ➔ ZH" : "ZH ➔ EN"
+        triggerDirectTranslation(text: lastText, frontPid: lastFrontPid, forcedDirection: newDirection)
     }
 
-    public func triggerDirectTranslation(text: String, frontPid: pid_t) {
+    public func retryTranslation() {
+        guard !lastText.isEmpty else { return }
+        triggerDirectTranslation(text: lastText, frontPid: lastFrontPid, forcedDirection: lastForcedDirection)
+    }
+
+    public func triggerDirectTranslation(text: String, frontPid: pid_t, forcedDirection: String? = nil) {
         lastText = text
         lastFrontPid = frontPid
+        lastForcedDirection = forcedDirection
         currentTranslationTask?.cancel()
 
         // 1. Immediately show Loading HUD on MainActor (0ms feedback!)
         DispatchQueue.main.async {
-            TranslationHudController.shared.showLoading(original: text, targetPid: frontPid)
+            TranslationHudController.shared.showLoading(original: text, targetPid: frontPid, forcedDirection: forcedDirection)
         }
 
         currentTranslationTask = Task {
             do {
                 let provider = await AppState.shared.translationProvider
-                let res = try await TranslationEngine.shared.translate(text: text, provider: provider)
+                let res = try await TranslationEngine.shared.translate(text: text, provider: provider, forcedDirection: forcedDirection)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     TranslationHudController.shared.updateTranslation(

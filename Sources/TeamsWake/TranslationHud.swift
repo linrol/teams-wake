@@ -91,6 +91,9 @@ public final class TranslationHudController: NSObject {
     private func createRootView() -> TranslationHudView {
         return TranslationHudView(
             model: model,
+            onToggleDirection: {
+                TranslateMonitor.shared.toggleDirectionAndRetranslate()
+            },
             onReplace: { [weak self] in
                 guard let self = self else { return }
                 self.replaceSelection(with: self.model.translated, in: self.model.targetPid)
@@ -133,21 +136,32 @@ public final class TranslationHudController: NSObject {
     }
 
     /// Instant feedback: Show HUD immediately with loading indicator (0ms latency)
-    public func showLoading(original: String, targetPid: pid_t, at point: CGPoint? = nil) {
+    public func showLoading(original: String, targetPid: pid_t, forcedDirection: String? = nil, at point: CGPoint? = nil) {
         dismissTimer?.invalidate()
         dismissTimer = nil
         speechSynthesizer?.stopSpeaking()
 
-        let isZh = TranslationEngine.isChineseDominant(original)
+        let direction: String
+        if let forced = forcedDirection {
+            direction = forced
+        } else {
+            let isZh = TranslationEngine.isChineseDominant(original)
+            direction = isZh ? "ZH ➔ EN" : "EN ➔ ZH"
+        }
+
         model.original = original
         model.translated = ""
-        model.direction = isZh ? "ZH ➔ EN" : "EN ➔ ZH"
+        model.direction = direction
         model.provider = "Translating..."
         model.targetPid = targetPid
         model.isLoading = true
         model.errorMessage = nil
 
-        presentPanel(at: point)
+        if let p = panel, p.isVisible {
+            updatePanelContentAndGeometry()
+        } else {
+            presentPanel(at: point)
+        }
     }
 
     /// Update HUD in-place when async translation completes, dynamically resizing window
@@ -185,7 +199,11 @@ public final class TranslationHudController: NSObject {
         model.isLoading = false
         model.errorMessage = nil
 
-        presentPanel(at: point)
+        if let p = panel, p.isVisible {
+            updatePanelContentAndGeometry()
+        } else {
+            presentPanel(at: point)
+        }
         startAutoDismissTimer()
     }
 
@@ -391,6 +409,7 @@ public final class TranslationHudController: NSObject {
 public struct TranslationHudView: View {
     @ObservedObject var state = AppState.shared
     @ObservedObject var model: TranslationHudModel
+    let onToggleDirection: () -> Void
     let onReplace: () -> Void
     let onCopy: () -> Void
     let onSpeak: () -> Void
@@ -398,6 +417,7 @@ public struct TranslationHudView: View {
     let onClose: () -> Void
 
     @State private var isCopied: Bool = false
+    @State private var isHoveringDirection: Bool = false
 
     private var cardWidth: CGFloat {
         let font = NSFont.systemFont(ofSize: 13, weight: .medium)
@@ -490,13 +510,31 @@ public struct TranslationHudView: View {
         VStack(alignment: .leading, spacing: 10) {
             // Header
             HStack(spacing: 8) {
-                HStack(spacing: 5) {
-                    Image(systemName: "character.book.closed.fill")
-                        .font(.system(size: 11))
-                        .foregroundColor(.accentColor)
-                    Text(model.direction)
-                        .font(.system(size: 11, weight: .bold))
+                // Entire direction pill is clickable to reverse direction
+                Button(action: onToggleDirection) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "character.book.closed.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.accentColor)
+                        Text(model.direction)
+                            .font(.system(size: 11, weight: .bold))
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(isHoveringDirection ? .accentColor : .secondary.opacity(0.8))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.secondary.opacity(isHoveringDirection ? 0.20 : 0.10))
+                    )
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    isHoveringDirection = hovering
+                }
+                .help("Switch translation direction (ZH ⇄ EN)")
 
                 Spacer()
 
