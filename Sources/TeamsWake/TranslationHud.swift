@@ -88,7 +88,33 @@ public final class TranslationHudController: NSObject {
         }
     }
 
-    private func setupPanelIfNeeded() {
+    private func createRootView() -> TranslationHudView {
+        return TranslationHudView(
+            model: model,
+            onReplace: { [weak self] in
+                guard let self = self else { return }
+                self.replaceSelection(with: self.model.translated, in: self.model.targetPid)
+            },
+            onCopy: { [weak self] in
+                guard let self = self else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.declareTypes([.string], owner: nil)
+                NSPasteboard.general.setString(self.model.translated, forType: .string)
+            },
+            onSpeak: { [weak self] in
+                guard let self = self else { return }
+                self.toggleSpeech(for: self.model.translated)
+            },
+            onRetry: {
+                TranslateMonitor.shared.retryTranslation()
+            },
+            onClose: { [weak self] in
+                self?.hide()
+            }
+        )
+    }
+
+    private func ensurePanelCreated() {
         if panel == nil {
             let p = NonActivatingPanel(
                 contentRect: NSRect(x: 0, y: 0, width: 380, height: 200),
@@ -103,34 +129,6 @@ public final class TranslationHudController: NSObject {
             p.isMovableByWindowBackground = true
             p.hidesOnDeactivate = false
             self.panel = p
-
-            let rootView = TranslationHudView(
-                model: model,
-                onReplace: { [weak self] in
-                    guard let self = self else { return }
-                    self.replaceSelection(with: self.model.translated, in: self.model.targetPid)
-                },
-                onCopy: { [weak self] in
-                    guard let self = self else { return }
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.declareTypes([.string], owner: nil)
-                    NSPasteboard.general.setString(self.model.translated, forType: .string)
-                },
-                onSpeak: { [weak self] in
-                    guard let self = self else { return }
-                    self.toggleSpeech(for: self.model.translated)
-                },
-                onRetry: {
-                    TranslateMonitor.shared.retryTranslation()
-                },
-                onClose: { [weak self] in
-                    self?.hide()
-                }
-            )
-
-            let hv = ClickThroughHostingView(rootView: rootView)
-            p.contentView = hv
-            self.hostingView = hv
         }
     }
 
@@ -152,7 +150,7 @@ public final class TranslationHudController: NSObject {
         presentPanel(at: point)
     }
 
-    /// Update HUD in-place when async translation completes
+    /// Update HUD in-place when async translation completes, dynamically resizing window
     public func updateTranslation(translated: String, direction: String, provider: String) {
         model.translated = translated
         model.direction = direction
@@ -160,7 +158,7 @@ public final class TranslationHudController: NSObject {
         model.isLoading = false
         model.errorMessage = nil
 
-        updatePanelGeometry()
+        updatePanelContentAndGeometry()
         startAutoDismissTimer()
     }
 
@@ -169,7 +167,8 @@ public final class TranslationHudController: NSObject {
         model.isLoading = false
         model.errorMessage = message
         model.provider = "Failed"
-        updatePanelGeometry()
+
+        updatePanelContentAndGeometry()
     }
 
     /// Direct display without loading state (backwards compatibility)
@@ -191,8 +190,12 @@ public final class TranslationHudController: NSObject {
     }
 
     private func presentPanel(at point: CGPoint? = nil) {
-        setupPanelIfNeeded()
-        guard let p = panel, let hv = hostingView else { return }
+        ensurePanelCreated()
+        guard let p = panel else { return }
+
+        let hv = ClickThroughHostingView(rootView: createRootView())
+        p.contentView = hv
+        self.hostingView = hv
 
         hv.layoutSubtreeIfNeeded()
         let fittingSize = hv.fittingSize
@@ -241,8 +244,13 @@ public final class TranslationHudController: NSObject {
         TranslateMonitor.hudShownDate = Date()
     }
 
-    public func updatePanelGeometry() {
-        guard let p = panel, let hv = hostingView, p.isVisible else { return }
+    public func updatePanelContentAndGeometry() {
+        guard let p = panel, p.isVisible else { return }
+
+        // Recreate hosting view with the updated model so layoutSubtreeIfNeeded can accurately compute new fittingSize
+        let hv = ClickThroughHostingView(rootView: createRootView())
+        p.contentView = hv
+        self.hostingView = hv
 
         hv.layoutSubtreeIfNeeded()
         let fittingSize = hv.fittingSize
@@ -256,6 +264,12 @@ public final class TranslationHudController: NSObject {
         frame.size.height = targetHeight
 
         let screen = NSScreen.main?.visibleFrame ?? NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        if frame.maxX > screen.maxX - 10 {
+            frame.origin.x = screen.maxX - frame.width - 10
+        }
+        if frame.minX < screen.minX + 10 {
+            frame.origin.x = screen.minX + 10
+        }
         if frame.minY < screen.minY + 15 {
             frame.origin.y = screen.minY + 15
         }
