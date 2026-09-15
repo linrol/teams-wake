@@ -208,30 +208,84 @@ public final class TranslateMonitor {
         self.isMonitoring = false
     }
 
+    public struct AXSelectionInfo {
+        public let text: String?
+        public let isZeroLengthCaret: Bool
+        public let isCopyExplicitlyDisabled: Bool
+    }
+
     /// Synchronously query currently focused UI element for selected text via macOS Accessibility API (< 1ms)
-    public static func getSelectedTextViaAccessibility() -> String? {
+    public static func getSelectedTextViaAccessibility() -> AXSelectionInfo {
         let systemWide = AXUIElementCreateSystemWide()
         var focusedAppVal: AnyObject?
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppVal) == .success,
               let focusedApp = focusedAppVal else {
-            return nil
+            return AXSelectionInfo(text: nil, isZeroLengthCaret: false, isCopyExplicitlyDisabled: false)
         }
 
         let appElement = focusedApp as! AXUIElement
         var focusedElementVal: AnyObject?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElementVal) == .success,
-              let focusedElement = focusedElementVal else {
-            return nil
+        let gotFocusedElement = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElementVal) == .success
+
+        if gotFocusedElement, let focusedElement = focusedElementVal {
+            let element = focusedElement as! AXUIElement
+
+            // 1. Direct selected text check
+            var selectedTextVal: AnyObject?
+            if AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selectedTextVal) == .success,
+               let str = selectedTextVal as? String {
+                let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    return AXSelectionInfo(text: trimmed, isZeroLengthCaret: false, isCopyExplicitlyDisabled: false)
+                }
+            }
+
+            // 2. Caret range check: if length == 0, caret is blinking in an input area with nothing selected
+            var selectedRangeVal: AnyObject?
+            if AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &selectedRangeVal) == .success,
+               CFGetTypeID(selectedRangeVal) == AXValueGetTypeID() {
+                let axVal = selectedRangeVal as! AXValue
+                var range = CFRange()
+                if AXValueGetValue(axVal, .cfRange, &range) && range.length == 0 {
+                    return AXSelectionInfo(text: nil, isZeroLengthCaret: true, isCopyExplicitlyDisabled: false)
+                }
+            }
         }
 
-        let element = focusedElement as! AXUIElement
-        var selectedTextVal: AnyObject?
-        if AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selectedTextVal) == .success,
-           let str = selectedTextVal as? String {
-            let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                return trimmed
+        // 3. Inspect application menu bar Edit -> Copy item to see if Copy is explicitly disabled
+        var copyDisabled = false
+        var menuBarVal: AnyObject?
+        if AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBarVal) == .success,
+           let menuBar = menuBarVal,
+           let menus = copyAttribute(menuBar as! AXUIElement, kAXChildrenAttribute) as? [AXUIElement] {
+            for menu in menus {
+                let title = (copyAttribute(menu, kAXTitleAttribute) as? String) ?? ""
+                if title == "Edit" || title == "编辑" || title == "編輯" {
+                    if let subLists = copyAttribute(menu, kAXChildrenAttribute) as? [AXUIElement],
+                       let menuList = subLists.first,
+                       let menuItems = copyAttribute(menuList, kAXChildrenAttribute) as? [AXUIElement] {
+                        for item in menuItems {
+                            let itemTitle = ((copyAttribute(item, kAXTitleAttribute) as? String) ?? "").trimmingCharacters(in: .whitespaces)
+                            if itemTitle.hasPrefix("Copy") || itemTitle.hasPrefix("拷贝") || itemTitle.hasPrefix("复制") || itemTitle.hasPrefix("拷貝") {
+                                if let enabled = copyAttribute(item, kAXEnabledAttribute) as? Bool, !enabled {
+                                    copyDisabled = true
+                                }
+                                break
+                            }
+                        }
+                    }
+                    break
+                }
             }
+        }
+
+        return AXSelectionInfo(text: nil, isZeroLengthCaret: false, isCopyExplicitlyDisabled: copyDisabled)
+    }
+
+    private static func copyAttribute(_ element: AXUIElement, _ attribute: String) -> AnyObject? {
+        var value: AnyObject?
+        if AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success {
+            return value
         }
         return nil
     }
@@ -276,6 +330,30 @@ public final class TranslateMonitor {
                 self?.isDetecting = false
             }
 
+            // 1. Try Accessibility API first (silent, zero pasteboard interference, no NSBeep)
+            let axInfo = TranslateMonitor.getSelectedTextViaAccessibility()
+            if let text = axInfo.text, !text.isEmpty {
+                self?.triggerDirectTranslation(text: text, frontPid: frontPid)
+                return
+            }
+
+            // 2. If caret is blinking in an input box with 0-length selection, user is just typing
+            if axInfo.isZeroLengthCaret {
+                if shouldReplay {
+                    self?.replayTargetKey()
+                }
+                return
+            }
+
+            // 3. If Copy menu item is explicitly disabled, Cmd+C will cause macOS NSBeep alert sound!
+            if axInfo.isCopyExplicitlyDisabled {
+                if shouldReplay {
+                    self?.replayTargetKey()
+                }
+                return
+            }
+
+            // 4. Fallback: only simulate Cmd+C when AX could not determine selection (e.g. non-standard views)
             let oldChangeCount = NSPasteboard.general.changeCount
             self?.simulateCmdC()
 
