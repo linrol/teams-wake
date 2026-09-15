@@ -10,6 +10,35 @@ public struct TranslationHudData: Identifiable {
     public let targetPid: pid_t
 }
 
+@MainActor
+public final class TranslationHudModel: ObservableObject {
+    @Published public var original: String = ""
+    @Published public var translated: String = ""
+    @Published public var direction: String = ""
+    @Published public var provider: String = ""
+    @Published public var targetPid: pid_t = 0
+    @Published public var isLoading: Bool = false
+    @Published public var errorMessage: String? = nil
+
+    public init(
+        original: String = "",
+        translated: String = "",
+        direction: String = "",
+        provider: String = "",
+        targetPid: pid_t = 0,
+        isLoading: Bool = false,
+        errorMessage: String? = nil
+    ) {
+        self.original = original
+        self.translated = translated
+        self.direction = direction
+        self.provider = provider
+        self.targetPid = targetPid
+        self.isLoading = isLoading
+        self.errorMessage = errorMessage
+    }
+}
+
 /// Core: Native floating panel that never steals focus
 /// Ensures active text selection and cursor are preserved when clicking panel buttons!
 final class NonActivatingPanel: NSPanel {
@@ -33,9 +62,10 @@ final class ClickThroughHostingView<Content: View>: NSHostingView<Content> {
 public final class TranslationHudController: NSObject {
     public static let shared = TranslationHudController()
 
+    public let model = TranslationHudModel()
     private var panel: NonActivatingPanel?
+    private var hostingView: ClickThroughHostingView<TranslationHudView>?
     private var dismissTimer: Timer?
-    private var currentData: TranslationHudData?
     private var speechSynthesizer: NSSpeechSynthesizer?
 
     private override init() {
@@ -58,10 +88,7 @@ public final class TranslationHudController: NSObject {
         }
     }
 
-    public func show(original: String, translated: String, direction: String, provider: String, targetPid: pid_t, at point: CGPoint? = nil) {
-        dismissTimer?.invalidate()
-        speechSynthesizer?.stopSpeaking()
-
+    private func setupPanelIfNeeded() {
         if panel == nil {
             let p = NonActivatingPanel(
                 contentRect: NSRect(x: 0, y: 0, width: 380, height: 200),
@@ -76,45 +103,102 @@ public final class TranslationHudController: NSObject {
             p.isMovableByWindowBackground = true
             p.hidesOnDeactivate = false
             self.panel = p
+
+            let rootView = TranslationHudView(
+                model: model,
+                onReplace: { [weak self] in
+                    guard let self = self else { return }
+                    self.replaceSelection(with: self.model.translated, in: self.model.targetPid)
+                },
+                onCopy: { [weak self] in
+                    guard let self = self else { return }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.declareTypes([.string], owner: nil)
+                    NSPasteboard.general.setString(self.model.translated, forType: .string)
+                },
+                onSpeak: { [weak self] in
+                    guard let self = self else { return }
+                    self.toggleSpeech(for: self.model.translated)
+                },
+                onRetry: {
+                    TranslateMonitor.shared.retryTranslation()
+                },
+                onClose: { [weak self] in
+                    self?.hide()
+                }
+            )
+
+            let hv = ClickThroughHostingView(rootView: rootView)
+            p.contentView = hv
+            self.hostingView = hv
         }
+    }
 
-        guard let p = panel else { return }
+    /// Instant feedback: Show HUD immediately with loading indicator (0ms latency)
+    public func showLoading(original: String, targetPid: pid_t, at point: CGPoint? = nil) {
+        dismissTimer?.invalidate()
+        dismissTimer = nil
+        speechSynthesizer?.stopSpeaking()
 
-        let data = TranslationHudData(
-            original: original,
-            translated: translated,
-            direction: direction,
-            provider: provider,
-            targetPid: targetPid
-        )
-        self.currentData = data
+        let isZh = original.range(of: "\\p{Han}", options: .regularExpression) != nil
+        model.original = original
+        model.translated = ""
+        model.direction = isZh ? "ZH ➔ EN" : "EN ➔ ZH"
+        model.provider = "Translating..."
+        model.targetPid = targetPid
+        model.isLoading = true
+        model.errorMessage = nil
 
-        let rootView = TranslationHudView(
-            data: data,
-            onReplace: { [weak self] in
-                self?.replaceSelection(with: translated, in: targetPid)
-            },
-            onCopy: {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.declareTypes([.string], owner: nil)
-                NSPasteboard.general.setString(translated, forType: .string)
-            },
-            onSpeak: { [weak self] in
-                self?.toggleSpeech(for: translated)
-            },
-            onClose: { [weak self] in
-                self?.hide()
-            }
-        )
+        presentPanel(at: point)
+    }
 
-        let hostingView = ClickThroughHostingView(rootView: rootView)
-        hostingView.layoutSubtreeIfNeeded()
+    /// Update HUD in-place when async translation completes
+    public func updateTranslation(translated: String, direction: String, provider: String) {
+        model.translated = translated
+        model.direction = direction
+        model.provider = provider
+        model.isLoading = false
+        model.errorMessage = nil
 
-        let fittingSize = hostingView.fittingSize
+        updatePanelGeometry()
+        startAutoDismissTimer()
+    }
+
+    /// Show error message in-place with retry button
+    public func showError(message: String) {
+        model.isLoading = false
+        model.errorMessage = message
+        model.provider = "Failed"
+        updatePanelGeometry()
+    }
+
+    /// Direct display without loading state (backwards compatibility)
+    public func show(original: String, translated: String, direction: String, provider: String, targetPid: pid_t, at point: CGPoint? = nil) {
+        dismissTimer?.invalidate()
+        dismissTimer = nil
+        speechSynthesizer?.stopSpeaking()
+
+        model.original = original
+        model.translated = translated
+        model.direction = direction
+        model.provider = provider
+        model.targetPid = targetPid
+        model.isLoading = false
+        model.errorMessage = nil
+
+        presentPanel(at: point)
+        startAutoDismissTimer()
+    }
+
+    private func presentPanel(at point: CGPoint? = nil) {
+        setupPanelIfNeeded()
+        guard let p = panel, let hv = hostingView else { return }
+
+        hv.layoutSubtreeIfNeeded()
+        let fittingSize = hv.fittingSize
         let targetWidth = max(285, fittingSize.width > 0 ? fittingSize.width : 360)
-        let targetHeight = max(110, min(500, fittingSize.height > 0 ? fittingSize.height : 200))
+        let targetHeight = max(110, min(500, fittingSize.height > 0 ? fittingSize.height : 160))
 
-        p.contentView = hostingView
         p.setContentSize(NSSize(width: targetWidth, height: targetHeight))
 
         // Position floating window with 4-edge smart boundary checks
@@ -155,8 +239,39 @@ public final class TranslationHudController: NSObject {
         TranslateMonitor.isHudVisible = true
         TranslateMonitor.cachedHudFrame = p.frame
         TranslateMonitor.hudShownDate = Date()
+    }
 
-        // Auto-dismiss timer (read user configured delay, 0 means never dismiss)
+    public func updatePanelGeometry() {
+        guard let p = panel, let hv = hostingView, p.isVisible else { return }
+
+        hv.layoutSubtreeIfNeeded()
+        let fittingSize = hv.fittingSize
+        let targetWidth = max(285, fittingSize.width > 0 ? fittingSize.width : 360)
+        let targetHeight = max(110, min(500, fittingSize.height > 0 ? fittingSize.height : 200))
+
+        var frame = p.frame
+        let heightDiff = targetHeight - frame.height
+        frame.origin.y -= heightDiff
+        frame.size.width = targetWidth
+        frame.size.height = targetHeight
+
+        let screen = NSScreen.main?.visibleFrame ?? NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        if frame.minY < screen.minY + 15 {
+            frame.origin.y = screen.minY + 15
+        }
+        if frame.maxY > screen.maxY - 10 {
+            frame.origin.y = screen.maxY - frame.height - 10
+        }
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.15
+            p.animator().setFrame(frame, display: true)
+        }
+        TranslateMonitor.cachedHudFrame = frame
+    }
+
+    private func startAutoDismissTimer() {
+        dismissTimer?.invalidate()
         let delay = Double(AppState.shared.translationDismissSeconds)
         if delay > 0 {
             dismissTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
@@ -173,7 +288,7 @@ public final class TranslationHudController: NSObject {
         dismissTimer = nil
         TranslateMonitor.isHudVisible = false
         TranslateMonitor.cachedHudFrame = .zero
-        currentData = nil
+        TranslateMonitor.shared.cancelCurrentTranslation()
         speechSynthesizer?.stopSpeaking()
 
         // Smooth fade-out animation
@@ -188,14 +303,14 @@ public final class TranslationHudController: NSObject {
 
     /// Supports pressing Enter to trigger replacement directly
     public func triggerReplaceFromEnterKey() {
-        guard let data = currentData else { return }
-        replaceSelection(with: data.translated, in: data.targetPid)
+        guard !model.isLoading, !model.translated.isEmpty else { return }
+        replaceSelection(with: model.translated, in: model.targetPid)
     }
 
     private var isReplacing: Bool = false
 
     private func replaceSelection(with text: String, in pid: pid_t) {
-        guard !isReplacing else { return }
+        guard !isReplacing, !text.isEmpty else { return }
         isReplacing = true
         defer {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -261,10 +376,11 @@ public final class TranslationHudController: NSObject {
 
 public struct TranslationHudView: View {
     @ObservedObject var state = AppState.shared
-    let data: TranslationHudData
+    @ObservedObject var model: TranslationHudModel
     let onReplace: () -> Void
     let onCopy: () -> Void
     let onSpeak: () -> Void
+    let onRetry: () -> Void
     let onClose: () -> Void
 
     @State private var isCopied: Bool = false
@@ -272,8 +388,8 @@ public struct TranslationHudView: View {
     private var cardWidth: CGFloat {
         let font = NSFont.systemFont(ofSize: 13, weight: .medium)
         
-        // Measure the physical width of each line in the translated text
-        let transLines = data.translated.components(separatedBy: "\n")
+        let sampleText = (model.isLoading || model.translated.isEmpty) ? model.original : model.translated
+        let transLines = sampleText.components(separatedBy: "\n")
         var maxLineWidth: CGFloat = 0
         for line in transLines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -284,32 +400,26 @@ public struct TranslationHudView: View {
             }
         }
         
-        // If translated text is very short, also check the first line of the original text
         if maxLineWidth < 180 {
             let origFont = NSFont.systemFont(ofSize: 11.5)
-            let firstOrig = data.original.components(separatedBy: "\n").first ?? ""
+            let firstOrig = model.original.components(separatedBy: "\n").first ?? ""
             let origW = (firstOrig as NSString).size(withAttributes: [.font: origFont]).width
             maxLineWidth = max(maxLineWidth, min(240, origW))
         }
         
-        // Add horizontal padding (14 on each side = 28) + margin allowance (14) = 42
         let neededWidth = ceil(maxLineWidth) + 42
-        
-        // Boundaries:
-        // Min 285pt: ensures header and action buttons fit comfortably without crowding
-        // Max 450pt: caps unbounded width for long continuous text paragraphs
         return max(285, min(450, neededWidth))
     }
 
     private var isLongText: Bool {
-        data.translated.count > 180 || data.translated.contains("\n\n") || data.translated.components(separatedBy: "\n").count > 6
+        model.translated.count > 180 || model.translated.contains("\n\n") || model.translated.components(separatedBy: "\n").count > 6
     }
 
     @ViewBuilder
     private var textContentView: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Original Text (compact single-line preview with subtle styling)
-            Text(data.original.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " "))
+            Text(model.original.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " "))
                 .font(.system(size: 11))
                 .foregroundColor(.secondary.opacity(0.85))
                 .lineLimit(1)
@@ -319,13 +429,44 @@ public struct TranslationHudView: View {
             Divider()
                 .opacity(0.35)
 
-            // Translated Text (comfortable line spacing for high readability)
-            Text(data.translated)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.primary)
-                .lineSpacing(3.5)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+            if model.isLoading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.65)
+                        .frame(width: 16, height: 16)
+                    Text("Translating...")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+            } else if let errorMsg = model.errorMessage {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                        .font(.system(size: 11))
+                    Text(errorMsg)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                    Spacer()
+                    Button(action: onRetry) {
+                        Text("Retry")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+                .padding(.vertical, 4)
+            } else {
+                // Translated Text (comfortable line spacing for high readability)
+                Text(model.translated)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.primary)
+                    .lineSpacing(3.5)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 2)
         .padding(.vertical, 2)
@@ -339,22 +480,24 @@ public struct TranslationHudView: View {
                     Image(systemName: "character.book.closed.fill")
                         .font(.system(size: 11))
                         .foregroundColor(.accentColor)
-                    Text(data.direction)
+                    Text(model.direction)
                         .font(.system(size: 11, weight: .bold))
                 }
 
                 Spacer()
 
-                // Pronounce TTS Button
-                Button(action: onSpeak) {
-                    Image(systemName: "speaker.wave.2")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                if !model.isLoading && !model.translated.isEmpty {
+                    // Pronounce TTS Button
+                    Button(action: onSpeak) {
+                        Image(systemName: "speaker.wave.2")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Pronounce translated text")
                 }
-                .buttonStyle(.plain)
-                .help("Pronounce translated text")
 
-                Text(data.provider)
+                Text(model.provider)
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 6)
@@ -393,6 +536,7 @@ public struct TranslationHudView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .disabled(model.isLoading || model.translated.isEmpty)
 
                 Button(action: {
                     onCopy()
@@ -410,6 +554,7 @@ public struct TranslationHudView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(model.isLoading || model.translated.isEmpty)
             }
         }
         .padding(14)

@@ -76,7 +76,7 @@ public actor TranslationEngine {
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.timeoutInterval = 5
+        req.timeoutInterval = 3.5
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0", forHTTPHeaderField: "User-Agent")
         req.setValue("https://edge.microsoft.com", forHTTPHeaderField: "Referer")
@@ -105,7 +105,7 @@ public actor TranslationEngine {
         }
 
         var req = URLRequest(url: url)
-        req.timeoutInterval = 5
+        req.timeoutInterval = 3.5
         req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
 
         let (data, response) = try await URLSession.shared.data(for: req)

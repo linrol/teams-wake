@@ -290,26 +290,46 @@ public final class TranslateMonitor {
         return nil
     }
 
-    public func triggerDirectTranslation(text: String, frontPid: pid_t) {
+    private var lastText: String = ""
+    private var lastFrontPid: pid_t = 0
+
+    public func cancelCurrentTranslation() {
         currentTranslationTask?.cancel()
+        currentTranslationTask = nil
+    }
+
+    public func retryTranslation() {
+        guard !lastText.isEmpty else { return }
+        triggerDirectTranslation(text: lastText, frontPid: lastFrontPid)
+    }
+
+    public func triggerDirectTranslation(text: String, frontPid: pid_t) {
+        lastText = text
+        lastFrontPid = frontPid
+        currentTranslationTask?.cancel()
+
+        // 1. Immediately show Loading HUD on MainActor (0ms feedback!)
+        DispatchQueue.main.async {
+            TranslationHudController.shared.showLoading(original: text, targetPid: frontPid)
+        }
+
         currentTranslationTask = Task {
             do {
                 let provider = await AppState.shared.translationProvider
                 let res = try await TranslationEngine.shared.translate(text: text, provider: provider)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    TranslationHudController.shared.show(
-                        original: text,
+                    TranslationHudController.shared.updateTranslation(
                         translated: res.result,
                         direction: res.direction,
-                        provider: res.actualProvider,
-                        targetPid: frontPid
+                        provider: res.actualProvider
                     )
                     AppState.shared.addLog(message: "[Translation (\(res.actualProvider))] \"\(text.prefix(20))...\" ➔ \"\(res.result.prefix(20))...\"", type: .info)
                 }
             } catch {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
+                    TranslationHudController.shared.showError(message: error.localizedDescription)
                     AppState.shared.addLog(message: "Translation failed: \(error.localizedDescription)", type: .error)
                 }
             }
