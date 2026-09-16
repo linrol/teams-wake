@@ -6,25 +6,47 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "=========================================="
-echo "  Building TeamsWake (Release Mode) ...  "
+echo "  Building TeamsWake (Universal 2 Release) ... "
 echo "=========================================="
 
-swift build -c release
-
-BIN_PATH="$REPO_ROOT/.build/release/TeamsWake"
 APP_BUNDLE="$REPO_ROOT/dist/TeamsWake.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
-echo "Creating App Bundle at: $APP_BUNDLE"
+echo "Creating App Bundle structure at: $APP_BUNDLE"
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR"
 mkdir -p "$RESOURCES_DIR"
 
-# Copy binary executable
-cp "$BIN_PATH" "$MACOS_DIR/TeamsWake"
+# Compile both arm64 (Apple Silicon) and x86_64 (Intel)
+ARM64_OK=0
+echo "--> Compiling arm64 (Apple Silicon) slice..."
+if swift build -c release --triple arm64-apple-macosx; then
+    ARM64_OK=1
+fi
+
+X86_OK=0
+echo "--> Compiling x86_64 (Intel) slice..."
+if swift build -c release --triple x86_64-apple-macosx; then
+    X86_OK=1
+fi
+
+ARM64_BIN="$REPO_ROOT/.build/arm64-apple-macosx/release/TeamsWake"
+X86_BIN="$REPO_ROOT/.build/x86_64-apple-macosx/release/TeamsWake"
+
+if [ "$ARM64_OK" -eq 1 ] && [ "$X86_OK" -eq 1 ] && [ -f "$ARM64_BIN" ] && [ -f "$X86_BIN" ]; then
+    echo "--> Merging into Universal 2 binary with lipo..."
+    lipo -create -output "$MACOS_DIR/TeamsWake" "$ARM64_BIN" "$X86_BIN"
+else
+    echo "--> Fallback: compiling host native architecture..."
+    swift build -c release
+    cp "$REPO_ROOT/.build/release/TeamsWake" "$MACOS_DIR/TeamsWake"
+fi
+
 chmod +x "$MACOS_DIR/TeamsWake"
+echo "Binary architecture:"
+file "$MACOS_DIR/TeamsWake"
 
 # Copy App Icon
 if [ -f "$REPO_ROOT/assets/AppIcon.icns" ]; then
@@ -62,6 +84,9 @@ cat <<EOF > "$CONTENTS_DIR/Info.plist"
 </dict>
 </plist>
 EOF
+
+# Clean any existing quarantine or extended attributes before signing
+xattr -cr "$APP_BUNDLE"
 
 # Code signing (using persistent certificate to maintain TCC accessibility permission across rebuilds/reinstalls)
 echo "Signing App Bundle..."

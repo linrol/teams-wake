@@ -41,5 +41,8 @@ echo "  Location: $APP_DEST"
 echo "  You can now launch it via Launchpad or Spotlight (⌘ + Space)!"
 echo "=========================================="
 
+# Clear quarantine attributes on installed app
+xattr -cr "$APP_DEST"
+
 # Launch installed application
 open "$APP_DEST"

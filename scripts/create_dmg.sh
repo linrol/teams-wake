@@ -19,6 +19,9 @@ mkdir -p "$DMG_TMP"
 cp -R "$REPO_ROOT/dist/TeamsWake.app" "$DMG_TMP/"
 ln -s /Applications "$DMG_TMP/Applications"
 
+# Clear all extended attributes and quarantine flags in staging
+xattr -cr "$DMG_TMP"
+
 rm -f "$DMG_OUTPUT"
 
 echo "Generating DMG image file..."
@@ -28,6 +31,9 @@ hdiutil create -volname "$VOLUME_NAME" \
     "$DMG_OUTPUT"
 
 rm -rf "$DMG_TMP"
+
+# Strip attributes from resulting DMG
+xattr -cr "$DMG_OUTPUT"
 
 echo "=========================================="
 echo "  🎉 DMG installer image build complete!"
