@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "TeamsWake",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v14)
     ],
     products: [
         .executable(
@@ -22,7 +22,8 @@ let package = Package(
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("IOKit"),
                 .linkedFramework("AppKit"),
-                .linkedFramework("ApplicationServices")
+                .linkedFramework("ApplicationServices"),
+                .linkedFramework("Translation")
             ]
         )
     ]

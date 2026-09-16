@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Translation
 
 public struct TranslationHudData: Identifiable {
     public let id = UUID()
@@ -623,5 +624,96 @@ public struct TranslationHudView: View {
                 .stroke(Color.white.opacity(0.2), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.25), radius: 15, x: 0, y: 6)
+        .applyAppleTranslation(model: model)
+    }
+}
+
+// MARK: - Apple Native Translation (macOS 15.0+ Sequoia)
+@available(macOS 15.0, *)
+struct AppleTranslationModifier: ViewModifier {
+    @ObservedObject var state = AppState.shared
+    @ObservedObject var model: TranslationHudModel
+    @State private var appleConfig: TranslationSession.Configuration?
+
+    func body(content: Content) -> some View {
+        content
+            .translationTask(appleConfig) { session in
+                guard state.translationProvider == .apple, model.isLoading, !model.original.isEmpty else { return }
+                do {
+                    try await session.prepareTranslation()
+                    let response = try await session.translate(model.original)
+                    TranslationHudController.shared.updateTranslation(
+                        translated: response.targetText,
+                        direction: model.direction,
+                        provider: "Apple (Native)"
+                    )
+                    AppState.shared.addLog(message: "[Translation (Apple Native)] \"\(model.original.prefix(20))...\" ➔ \"\(response.targetText.prefix(20))...\"", type: .info)
+                } catch {
+                    AppState.shared.addLog(message: "Apple translation unavailable (\(error.localizedDescription)), falling back to Microsoft...", type: .warning)
+                    Task {
+                        do {
+                            let fallback = try await TranslationEngine.shared.translate(
+                                text: model.original,
+                                provider: .microsoft,
+                                forcedDirection: model.direction
+                            )
+                            TranslationHudController.shared.updateTranslation(
+                                translated: fallback.result,
+                                direction: fallback.direction,
+                                provider: "\(fallback.actualProvider) (Fallback)"
+                            )
+                            AppState.shared.addLog(message: "[Translation (\(fallback.actualProvider))] \"\(model.original.prefix(20))...\" ➔ \"\(fallback.result.prefix(20))...\"", type: .info)
+                        } catch {
+                            TranslationHudController.shared.showError(message: error.localizedDescription)
+                            AppState.shared.addLog(message: "Translation failed: \(error.localizedDescription)", type: .error)
+                        }
+                    }
+                }
+            }
+            .onAppear {
+                updateAppleConfig()
+            }
+            .onChange(of: model.isLoading) { _, loading in
+                if loading {
+                    updateAppleConfig()
+                }
+            }
+            .onChange(of: model.direction) { _, _ in
+                updateAppleConfig()
+            }
+            .onChange(of: state.translationProvider) { _, _ in
+                updateAppleConfig()
+            }
+    }
+
+    private func updateAppleConfig() {
+        guard state.translationProvider == .apple, model.isLoading, !model.original.isEmpty else {
+            appleConfig = nil
+            return
+        }
+        let isZh = (model.direction == "ZH ➔ EN")
+        let sourceLang = isZh ? "zh-Hans" : "en"
+        let targetLang = isZh ? "en" : "zh-Hans"
+        let newConfig = TranslationSession.Configuration(
+            source: Locale.Language(identifier: sourceLang),
+            target: Locale.Language(identifier: targetLang)
+        )
+        if appleConfig == nil {
+            appleConfig = newConfig
+        } else {
+            appleConfig = newConfig
+            appleConfig?.invalidate()
+        }
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func applyAppleTranslation(model: TranslationHudModel) -> some View {
+        if #available(macOS 15.0, *) {
+            self.modifier(AppleTranslationModifier(model: model))
+        } else {
+            self
+        }
     }
 }

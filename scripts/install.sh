@@ -71,7 +71,7 @@ cat <<EOF > "$CONTENTS_DIR/Info.plist"
     <key>GitCommitMessage</key>
     <string>${GIT_MSG}</string>
     <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
+    <string>14.4</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>

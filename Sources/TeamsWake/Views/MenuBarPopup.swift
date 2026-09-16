@@ -11,6 +11,7 @@ public struct MenuBarPopup: View {
     @State private var newEndTime: String = "22:00"
     @State private var isLogsCopied: Bool = false
     @State private var isVersionCopied: Bool = false
+    @State private var modelDownloadWarning: String? = nil
 
     public init() {}
 
@@ -366,7 +367,36 @@ public struct MenuBarPopup: View {
 
                         Spacer()
 
-                        Picker("", selection: $state.translationProvider) {
+                        Picker("", selection: Binding(
+                            get: { state.translationProvider },
+                            set: { newProvider in
+                                if newProvider == .apple {
+                                    Task { @MainActor in
+                                        let status = await AppleTranslationChecker.checkStatus()
+                                        switch status {
+                                        case .installed:
+                                            withAnimation(.easeInOut(duration: 0.2)) {
+                                                modelDownloadWarning = nil
+                                            }
+                                            state.translationProvider = .apple
+                                        case .notDownloaded:
+                                            withAnimation(.easeInOut(duration: 0.2)) {
+                                                modelDownloadWarning = "The on-device Chinese ⇋ English model is not downloaded.\nGo to: System Settings ➔ General ➔ Language & Region ➔ Translation Languages"
+                                            }
+                                        case .unsupported:
+                                            withAnimation(.easeInOut(duration: 0.2)) {
+                                                modelDownloadWarning = "Apple on-device translation requires macOS 15.0 Sequoia or newer."
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        modelDownloadWarning = nil
+                                    }
+                                    state.translationProvider = newProvider
+                                }
+                            }
+                        )) {
                             ForEach(TranslationProvider.allCases) { p in
                                 Text(p.displayName).tag(p)
                             }
@@ -374,6 +404,40 @@ public struct MenuBarPopup: View {
                         .pickerStyle(.menu)
                         .labelsHidden()
                         .controlSize(.mini)
+                    }
+
+                    // Inline warning banner for Apple Translation model status
+                    if let warning = modelDownloadWarning {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                                .font(.system(size: 12))
+                                .padding(.top, 1)
+
+                            Text(warning)
+                                .font(.system(size: 10))
+                                .foregroundColor(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Spacer()
+
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    modelDownloadWarning = nil
+                                }
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary.opacity(0.6))
+                                    .font(.system(size: 12))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.orange.opacity(0.15))
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
                     // Auto dismiss delay

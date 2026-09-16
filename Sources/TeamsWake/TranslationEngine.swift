@@ -1,12 +1,43 @@
 import Foundation
+import AppKit
+import Translation
+
+public enum AppleModelStatus: Equatable {
+    case installed
+    case notDownloaded
+    case unsupported
+}
+
+@MainActor
+public final class AppleTranslationChecker {
+    public static func checkStatus() async -> AppleModelStatus {
+        if #available(macOS 15.0, *) {
+            let availability = LanguageAvailability()
+            let zhToEn = await availability.status(from: Locale.Language(identifier: "zh-Hans"), to: Locale.Language(identifier: "en"))
+            let enToZh = await availability.status(from: Locale.Language(identifier: "en"), to: Locale.Language(identifier: "zh-Hans"))
+
+            if zhToEn == .installed && enToZh == .installed {
+                return .installed
+            } else if zhToEn == .supported || enToZh == .supported {
+                return .notDownloaded
+            } else {
+                return .unsupported
+            }
+        } else {
+            return .unsupported
+        }
+    }
+}
 
 public enum TranslationProvider: String, CaseIterable, Identifiable, Codable {
+    case apple = "apple"
     case microsoft = "microsoft"
     case google = "google"
 
     public var id: String { rawValue }
     public var displayName: String {
         switch self {
+        case .apple: return "Apple (Native)"
         case .microsoft: return "Microsoft (Edge)"
         case .google: return "Google Translate"
         }
@@ -87,7 +118,15 @@ public actor TranslationEngine {
         var translatedText = ""
         var usedProvider = provider.displayName
 
-        if provider == .microsoft {
+        if provider == .apple {
+            do {
+                translatedText = try await translateViaMicrosoftEdge(text: trimmed, from: fromLang, to: toLang)
+                usedProvider = "Microsoft (Edge)"
+            } catch {
+                translatedText = try await translateViaGoogle(text: trimmed, from: isZh ? "zh-CN" : "en", to: isZh ? "en" : "zh-CN")
+                usedProvider = "Google (Fallback)"
+            }
+        } else if provider == .microsoft {
             do {
                 translatedText = try await translateViaMicrosoftEdge(text: trimmed, from: fromLang, to: toLang)
             } catch {

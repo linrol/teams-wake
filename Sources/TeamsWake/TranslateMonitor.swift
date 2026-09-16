@@ -327,8 +327,13 @@ public final class TranslateMonitor {
         }
 
         currentTranslationTask = Task {
+            let provider = await AppState.shared.translationProvider
+            // On macOS 15+, Apple Native Translation is handled directly by AppleTranslationModifier in TranslationHudView
+            if #available(macOS 15.0, *), provider == .apple {
+                return
+            }
+
             do {
-                let provider = await AppState.shared.translationProvider
                 let res = try await TranslationEngine.shared.translate(text: text, provider: provider, forcedDirection: forcedDirection)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {

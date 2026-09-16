@@ -101,7 +101,7 @@ public final class AppState: ObservableObject {
         }
     }
 
-    @Published public var translationProvider: TranslationProvider = .microsoft {
+    @Published public var translationProvider: TranslationProvider = .apple {
         didSet {
             defaults.set(translationProvider.rawValue, forKey: keyTranslationProvider)
             addLog(message: "Translation provider changed to: \(translationProvider.displayName)", type: .info)
@@ -201,6 +201,17 @@ public final class AppState: ObservableObject {
             if self.isAutoTranslateActive && self.hasAccessibilityPermission {
                 TranslateMonitor.shared.startMonitoring(with: self.translationShortcut)
                 self.addLog(message: "Auto translation monitor activated on launch (Shortcut: \(self.translationShortcut.label))", type: .info)
+            }
+
+            // Check if Apple Native Translation model is installed
+            if self.translationProvider == .apple {
+                Task { @MainActor in
+                    let status = await AppleTranslationChecker.checkStatus()
+                    if status != .installed {
+                        self.addLog(message: "[Translation] Apple on-device model not downloaded yet, defaulting to Microsoft (Edge)", type: .warning)
+                        self.translationProvider = .microsoft
+                    }
+                }
             }
         }
     }
