@@ -25,6 +25,8 @@ public struct TranslationShortcut: Codable, Equatable, Hashable, Identifiable {
         TranslationShortcut(label: "⌘ ⌥ D (Cmd + Option + D)", keyCode: 2, modifiers: "cmd+alt"),
         TranslationShortcut(label: "F1", keyCode: 122, modifiers: "none"),
         TranslationShortcut(label: "F2", keyCode: 120, modifiers: "none"),
-        TranslationShortcut(label: "F4", keyCode: 118, modifiers: "none")
+        TranslationShortcut(label: "F4", keyCode: 118, modifiers: "none"),
+        TranslationShortcut(label: "F5", keyCode: 96, modifiers: "none"),
+        TranslationShortcut(label: "F6", keyCode: 97, modifiers: "none")
     ]
 }
