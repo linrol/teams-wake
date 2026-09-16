@@ -1,0 +1,7 @@
+{
+  "version": "2.0.0",
+  "commit": "5701640",
+  "date": "2026-09-16",
+  "message": "refactor: consolidate app packaging and DMG creation scripts into a unified release script",
+  "dmgUrl": "https://github.com/linrol/teams-wake/releases/download/v2.0.0/TeamsWake-2.0.0.dmg"
+}

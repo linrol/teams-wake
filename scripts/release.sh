@@ -152,6 +152,18 @@ hdiutil create -volname "$VOLUME_NAME" \
 rm -rf "$DMG_TMP"
 xattr -cr "$DMG_OUTPUT"
 
+# Generate version.json for auto-updater
+VERSION_JSON="$REPO_ROOT/version.json"
+cat <<EOF > "$VERSION_JSON"
+{
+  "version": "${VERSION}",
+  "commit": "${GIT_COMMIT}",
+  "date": "${GIT_DATE}",
+  "message": "${GIT_MSG}",
+  "dmgUrl": "https://github.com/linrol/teams-wake/releases/download/${TAG}/TeamsWake-${VERSION}.dmg"
+}
+EOF
+
 # Sync Git tag & GitHub Release
 echo "--> Step 4/4: Synchronizing Tag & Publishing Release to GitHub..."
 if git rev-parse "$TAG" >/dev/null 2>&1; then
@@ -166,12 +178,12 @@ git push github "$TAG" --force
 git push origin "$TAG" --force
 
 if gh release view "$TAG" >/dev/null 2>&1; then
-    echo "    Release ${TAG} exists on GitHub. Overwriting asset (--clobber)..."
-    gh release upload "$TAG" "$DMG_OUTPUT" --clobber
+    echo "    Release ${TAG} exists on GitHub. Overwriting assets (--clobber)..."
+    gh release upload "$TAG" "$DMG_OUTPUT" "$VERSION_JSON" --clobber
     echo "✅ Successfully overwritten existing release ${TAG}!"
 else
     echo "    Release ${TAG} does not exist. Creating new release..."
-    gh release create "$TAG" "$DMG_OUTPUT" \
+    gh release create "$TAG" "$DMG_OUTPUT" "$VERSION_JSON" \
         --title "Teams Wake ${TAG} - Universal 2 Release" \
         --generate-notes
     echo "✅ Successfully created new release ${TAG}!"

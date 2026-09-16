@@ -3,6 +3,7 @@ import AppKit
 
 public struct MenuBarPopup: View {
     @ObservedObject var state = AppState.shared
+    @ObservedObject var updateManager = UpdateManager.shared
     @State private var isScheduleExpanded: Bool = false
     @State private var isAddingSchedule: Bool = false
     @State private var newScheduleName: String = ""
@@ -34,6 +35,11 @@ public struct MenuBarPopup: View {
 
             // MARK: - Logs View
             logsSection
+
+            // MARK: - Update Banner (if available)
+            if updateManager.hasUpdate || updateManager.isDownloading || updateManager.updateError != nil {
+                updateBanner
+            }
 
             Divider()
 
@@ -515,26 +521,93 @@ public struct MenuBarPopup: View {
         return lines.joined(separator: "\n")
     }
 
+    private var updateBanner: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                    .foregroundColor(.accentColor)
+                    .font(.system(size: 13))
+
+                if let info = updateManager.remoteInfo {
+                    Text("New update: v\(info.version) (\(info.commit))")
+                        .font(.system(size: 11, weight: .semibold))
+                } else if let err = updateManager.updateError {
+                    Text(err)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                if updateManager.isDownloading {
+                    ProgressView()
+                        .scaleEffect(0.65)
+                        .frame(width: 16, height: 16)
+                } else if updateManager.hasUpdate {
+                    Button(action: {
+                        updateManager.downloadAndInstallUpdate()
+                    }) {
+                        Text("Update & Restart")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
+                }
+            }
+
+            if updateManager.isDownloading {
+                ProgressView(value: updateManager.downloadProgress, total: 1.0)
+                    .progressViewStyle(.linear)
+            } else if let msg = updateManager.remoteInfo?.message, !msg.isEmpty {
+                Text(msg)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.accentColor.opacity(0.12))
+        )
+    }
+
     private var bottomActions: some View {
         HStack {
-            Button(action: {
-                let msg = Bundle.main.infoDictionary?["GitCommitMessage"] as? String ?? ""
-                let textToCopy = "\(appVersionString)\(msg.isEmpty ? "" : " - " + msg)"
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(textToCopy, forType: .string)
-                isVersionCopied = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    isVersionCopied = false
-                }
-            }) {
-                HStack(spacing: 4) {
+            HStack(spacing: 6) {
+                Button(action: {
+                    let msg = Bundle.main.infoDictionary?["GitCommitMessage"] as? String ?? ""
+                    let textToCopy = "\(appVersionString)\(msg.isEmpty ? "" : " - " + msg)"
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(textToCopy, forType: .string)
+                    isVersionCopied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        isVersionCopied = false
+                    }
+                }) {
                     Text(isVersionCopied ? "Copied!" : appVersionString)
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundColor(isVersionCopied ? .green : .secondary.opacity(0.85))
                 }
+                .buttonStyle(.plain)
+                .help(commitDetailTooltip)
+
+                Button(action: {
+                    Task {
+                        await updateManager.checkForUpdates(silent: false)
+                    }
+                }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary.opacity(0.7))
+                        .rotationEffect(.degrees(updateManager.isChecking ? 360 : 0))
+                        .animation(updateManager.isChecking ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: updateManager.isChecking)
+                }
+                .buttonStyle(.plain)
+                .help("Check for updates")
+                .disabled(updateManager.isChecking || updateManager.isDownloading)
             }
-            .buttonStyle(.plain)
-            .help(commitDetailTooltip)
 
             Spacer()
 
