@@ -152,8 +152,8 @@ hdiutil create -volname "$VOLUME_NAME" \
 rm -rf "$DMG_TMP"
 xattr -cr "$DMG_OUTPUT"
 
-# Generate version.json for auto-updater
-VERSION_JSON="$REPO_ROOT/version.json"
+# Generate version.json for auto-updater in git-ignored dist directory
+VERSION_JSON="$REPO_ROOT/dist/version.json"
 cat <<EOF > "$VERSION_JSON"
 {
   "version": "${VERSION}",

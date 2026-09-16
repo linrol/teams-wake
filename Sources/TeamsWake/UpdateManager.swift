@@ -26,8 +26,8 @@ public final class UpdateManager: NSObject, ObservableObject {
     private var observation: NSKeyValueObservation?
 
     private let updateEndpoints: [String] = [
-        "https://raw.githubusercontent.com/linrol/teams-wake/master/version.json",
-        "https://gitee.com/linrol/teams-wake/raw/master/version.json"
+        "https://github.com/linrol/teams-wake/releases/latest/download/version.json",
+        "https://raw.githubusercontent.com/linrol/teams-wake/master/version.json"
     ]
 
     public var localVersion: String {
