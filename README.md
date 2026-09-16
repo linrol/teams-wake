@@ -41,26 +41,25 @@
 
 ---
 
-## 🛠️ 本地构建与安装
+## 🛠️ 构建与发布工作流
 
-项目使用 Apple 官方标准 **Swift Package Manager (SPM)** 构建，无需安装 Node.js、Electron 或任何外部依赖：
+项目极简设计，仅保留两个核心脚本：
 
-### 1. 一键安装到系统「应用程序」
+### 1. 日常开发本地验证（一键安装生效）
 ```bash
 ./scripts/install.sh
 ```
-*自动编译 Release 架构、完成代码签名并安装至 `/Applications/TeamsWake.app`，开箱即用。*
+*本地增量极速编译、签名并自动覆盖安装到 `/Applications/TeamsWake.app`，重启应用直接体验验证。*
 
-### 2. 制作标准 macOS DMG 安装包
+### 2. 正式版本打包发布（Universal 2 双架构 + 自动发布）
 ```bash
-./scripts/create_dmg.sh
-```
-*生成标准的拖拽式安装镜像：`dist/TeamsWake-2.0.0.dmg`。*
+# 发布指定版本号（若远端该版本已存在则自动覆盖，不存在则新建）
+./scripts/release.sh 2.0.1
 
-### 3. 本地调试编译
-```bash
-swift build
+# 默认发布当前版本
+./scripts/release.sh
 ```
+*自动编译 Apple Silicon + Intel 双架构 Universal 2 二进制、打包 DMG、同步 Git Tag、自动发布或覆盖更新 GitHub Releases。*
 
 ---
 
