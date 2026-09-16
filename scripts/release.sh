@@ -74,7 +74,12 @@ if [ -f "$REPO_ROOT/assets/AppIcon.icns" ]; then
     cp "$REPO_ROOT/assets/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 fi
 
-# Write Info.plist with specified version
+# Extract Git metadata
+GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
+GIT_DATE=$(git log -1 --format="%cd" --date=short 2>/dev/null || echo "")
+GIT_MSG=$(git log -1 --format="%s" 2>/dev/null | tr -d '"&<>' || echo "")
+
+# Write Info.plist with specified version and git metadata
 cat <<EOF > "$CONTENTS_DIR/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -96,6 +101,12 @@ cat <<EOF > "$CONTENTS_DIR/Info.plist"
     <string>${VERSION}</string>
     <key>CFBundleVersion</key>
     <string>${BUILD_NUMBER}</string>
+    <key>GitCommit</key>
+    <string>${GIT_COMMIT}</string>
+    <key>GitCommitDate</key>
+    <string>${GIT_DATE}</string>
+    <key>GitCommitMessage</key>
+    <string>${GIT_MSG}</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>

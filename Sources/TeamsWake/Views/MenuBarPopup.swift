@@ -9,6 +9,7 @@ public struct MenuBarPopup: View {
     @State private var newStartTime: String = "19:00"
     @State private var newEndTime: String = "22:00"
     @State private var isLogsCopied: Bool = false
+    @State private var isVersionCopied: Bool = false
 
     public init() {}
 
@@ -484,11 +485,56 @@ public struct MenuBarPopup: View {
         }
     }
 
+    private var appVersionString: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0.0"
+        let commit = Bundle.main.infoDictionary?["GitCommit"] as? String ?? ""
+        if !commit.isEmpty {
+            return "v\(version) (\(commit))"
+        }
+        return "v\(version)"
+    }
+
+    private var commitDetailTooltip: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0.0"
+        let commit = Bundle.main.infoDictionary?["GitCommit"] as? String ?? ""
+        let date = Bundle.main.infoDictionary?["GitCommitDate"] as? String ?? ""
+        let msg = Bundle.main.infoDictionary?["GitCommitMessage"] as? String ?? ""
+
+        var lines: [String] = ["Teams Wake v\(version)"]
+        if !commit.isEmpty {
+            var commitLine = "Commit: \(commit)"
+            if !date.isEmpty {
+                commitLine += " (\(date))"
+            }
+            lines.append(commitLine)
+        }
+        if !msg.isEmpty {
+            lines.append("Message: \(msg)")
+        }
+        lines.append("Click to copy version details")
+        return lines.joined(separator: "\n")
+    }
+
     private var bottomActions: some View {
         HStack {
-            Text("Teams Wake Native Edition")
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
+            Button(action: {
+                let msg = Bundle.main.infoDictionary?["GitCommitMessage"] as? String ?? ""
+                let textToCopy = "\(appVersionString)\(msg.isEmpty ? "" : " - " + msg)"
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(textToCopy, forType: .string)
+                isVersionCopied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    isVersionCopied = false
+                }
+            }) {
+                HStack(spacing: 4) {
+                    Text(isVersionCopied ? "Copied!" : appVersionString)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(isVersionCopied ? .green : .secondary.opacity(0.85))
+                }
+            }
+            .buttonStyle(.plain)
+            .help(commitDetailTooltip)
 
             Spacer()
 
