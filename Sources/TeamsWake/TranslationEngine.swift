@@ -19,6 +19,16 @@ public actor TranslationEngine {
     private var cache: [String: String] = [:]
     private let maxCacheSize = 200
 
+    /// Dedicated ephemeral session: no disk caching/cookies, strict fast-fail timeouts for seamless failover
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 3.5
+        config.timeoutIntervalForResource = 5.0
+        config.waitsForConnectivity = false
+        config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        return URLSession(configuration: config)
+    }()
+
     private init() {}
 
     /// Determines whether the text should be primarily treated as Chinese based on weighted character density
@@ -116,7 +126,7 @@ public actor TranslationEngine {
         req.setValue("https://edge.microsoft.com", forHTTPHeaderField: "Referer")
         req.httpBody = try JSONSerialization.data(withJSONObject: [text])
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await session.data(for: req)
         guard let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200 else {
             throw NSError(domain: "TranslationEngine", code: -2, userInfo: [NSLocalizedDescriptionKey: "Microsoft Edge HTTP status not 200"])
         }
@@ -142,7 +152,7 @@ public actor TranslationEngine {
         req.timeoutInterval = 3.5
         req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await session.data(for: req)
         guard let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200 else {
             throw NSError(domain: "TranslationEngine", code: -5, userInfo: [NSLocalizedDescriptionKey: "Google HTTP status not 200"])
         }

@@ -161,11 +161,22 @@ public final class UpdateManager: NSObject, ObservableObject {
         task.resume()
     }
 
-    /// Spawn a detached script to mount DMG, replace /Applications/TeamsWake.app and relaunch
+    /// Spawn a detached script to mount DMG, replace running app bundle, and relaunch
     private func performAppReplacement() {
         let scriptPath = "/tmp/teams_wake_updater.sh"
+
+        // Dynamically resolve target installation path of currently running app
+        let bundlePath = Bundle.main.bundlePath
+        let targetAppPath: String
+        if bundlePath.hasSuffix(".app") {
+            targetAppPath = bundlePath
+        } else {
+            targetAppPath = "/Applications/TeamsWake.app"
+        }
+
         let scriptContent = """
         #!/bin/bash
+        TARGET_APP="\(targetAppPath)"
         sleep 0.5
         for i in {1..25}; do
             if ! pgrep -x TeamsWake >/dev/null; then break; fi
@@ -177,9 +188,9 @@ public final class UpdateManager: NSObject, ObservableObject {
         hdiutil attach "/tmp/TeamsWake_update.dmg" -mountpoint "$TMP_MOUNT" -nobrowse -quiet
 
         if [ -d "$TMP_MOUNT/TeamsWake.app" ]; then
-            rm -rf "/Applications/TeamsWake.app"
-            cp -R "$TMP_MOUNT/TeamsWake.app" "/Applications/TeamsWake.app"
-            xattr -cr "/Applications/TeamsWake.app"
+            rm -rf "$TARGET_APP"
+            cp -R "$TMP_MOUNT/TeamsWake.app" "$TARGET_APP"
+            xattr -cr "$TARGET_APP"
         fi
 
         hdiutil detach "$TMP_MOUNT" -quiet 2>/dev/null || true
@@ -187,7 +198,7 @@ public final class UpdateManager: NSObject, ObservableObject {
         rm -f "/tmp/TeamsWake_update.dmg"
         rm -f "$0"
 
-        open "/Applications/TeamsWake.app"
+        open "$TARGET_APP"
         """
 
         do {
