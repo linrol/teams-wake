@@ -86,8 +86,11 @@ public final class TranslateMonitor {
                 if type == .leftMouseDown {
                     if TranslateMonitor.isHudVisible {
                         let loc = event.location
-                        let screenHeight = NSScreen.main?.frame.height ?? 1080.0
-                        let cocoaPoint = NSPoint(x: loc.x, y: screenHeight - loc.y)
+                        // CGEvent global coordinates are anchored to the primary display's top-left,
+                        // so the flip must use the primary screen height (NSScreen.main is the focused
+                        // screen and can differ, causing in-HUD clicks to be misread as outside).
+                        let primaryHeight = NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 1080.0
+                        let cocoaPoint = NSPoint(x: loc.x, y: primaryHeight - loc.y)
                         let hitRect = TranslateMonitor.cachedHudFrame.insetBy(dx: -8, dy: -8)
 
                         // Only dismiss when click point is outside HUD window and HUD has been shown for > 150ms
