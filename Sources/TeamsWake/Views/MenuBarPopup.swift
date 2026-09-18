@@ -556,8 +556,8 @@ public struct MenuBarPopup: View {
     }
 
     private var appVersionString: String {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0.0"
-        let commit = Bundle.main.infoDictionary?["GitCommit"] as? String ?? ""
+        let version = UpdateManager.shared.localVersion
+        let commit = UpdateManager.shared.localCommit
         if !commit.isEmpty {
             return "v\(version) (\(commit))"
         }
@@ -565,10 +565,10 @@ public struct MenuBarPopup: View {
     }
 
     private var commitDetailTooltip: String {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0.0"
-        let commit = Bundle.main.infoDictionary?["GitCommit"] as? String ?? ""
-        let date = Bundle.main.infoDictionary?["GitCommitDate"] as? String ?? ""
-        let msg = Bundle.main.infoDictionary?["GitCommitMessage"] as? String ?? ""
+        let version = UpdateManager.shared.localVersion
+        let commit = UpdateManager.shared.localCommit
+        let date = UpdateManager.shared.localCommitDate
+        let msg = UpdateManager.shared.localCommitMessage
 
         var lines: [String] = ["Teams Wake v\(version)"]
         if !commit.isEmpty {

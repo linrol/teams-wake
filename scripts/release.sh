@@ -4,8 +4,12 @@ set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# 1. Parse target version (safely fetch latest tag and prompt if missing)
-LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v2.0.0")
+# 1. Parse target version
+if ! LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null) || [ -z "$LATEST_TAG" ]; then
+    echo "❌ Error: Failed to retrieve latest Git tag."
+    echo "Please ensure the repository has at least one Git tag."
+    exit 1
+fi
 LATEST_VER="${LATEST_TAG#v}"
 
 TARGET_VER="$1"
@@ -17,7 +21,7 @@ if [ -z "$TARGET_VER" ]; then
     else
         echo "❌ Error: Version argument is required."
         echo "Usage: ./scripts/release.sh <version>"
-        echo "Example: ./scripts/release.sh 2.0.1"
+        echo "Example: ./scripts/release.sh 2.0.0"
         echo "Current latest release: ${LATEST_TAG}"
         exit 1
     fi

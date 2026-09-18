@@ -33,11 +33,10 @@ if [ -f "$REPO_ROOT/assets/AppIcon.icns" ]; then
     cp "$REPO_ROOT/assets/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 fi
 
-# Determine version and git metadata
-LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v2.0.0")
-VERSION="${LATEST_TAG#v}"
-BUILD_NUMBER=$(echo "$VERSION" | tr -cd '0-9')
-if [ -z "$BUILD_NUMBER" ]; then BUILD_NUMBER="200"; fi
+# Determine version and git metadata (default to 'dev' for local development)
+VERSION="${1:-dev}"
+VERSION="${VERSION#v}"
+BUILD_NUMBER="1"
 
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
 GIT_DATE=$(git log -1 --format="%cd" --date=short 2>/dev/null || echo "")

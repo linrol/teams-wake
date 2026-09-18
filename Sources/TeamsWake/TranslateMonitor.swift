@@ -27,6 +27,10 @@ public final class TranslateMonitor {
     private var isRightClickMode: Bool = false
     private var isSingleKeyMode: Bool = true
     public var isDetecting: Bool = false
+    public var hasRecentSelection: Bool = false
+    public var lastSelectionTime: Date = .distantPast
+    private var lastLeftMouseDownPoint: CGPoint = .zero
+    private var lastLeftMouseDownTime: Date = .distantPast
     private var currentTranslationTask: Task<Void, Never>?
 
     private init() {}
@@ -64,6 +68,7 @@ public final class TranslateMonitor {
         }
 
         var mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.leftMouseDown.rawValue)
+        mask |= (1 << CGEventType.leftMouseUp.rawValue)
         mask |= (1 << CGEventType.rightMouseDown.rawValue)
 
         guard let tap = CGEvent.tapCreate(
@@ -84,6 +89,9 @@ public final class TranslateMonitor {
 
                 // Dismiss HUD when clicking outside (do not dismiss when clicking inside HUD so buttons trigger properly)
                 if type == .leftMouseDown {
+                    TranslateMonitor.shared.lastLeftMouseDownPoint = event.location
+                    TranslateMonitor.shared.lastLeftMouseDownTime = Date()
+
                     if TranslateMonitor.isHudVisible {
                         let loc = event.location
                         // CGEvent global coordinates are anchored to the primary display's top-left,
@@ -101,6 +109,23 @@ public final class TranslateMonitor {
                                 }
                             }
                         }
+                    }
+                    return Unmanaged.passUnretained(event)
+                }
+
+                // Track mouse selection gestures (drag select or double/triple click)
+                if type == .leftMouseUp {
+                    let loc = event.location
+                    let dx = loc.x - TranslateMonitor.shared.lastLeftMouseDownPoint.x
+                    let dy = loc.y - TranslateMonitor.shared.lastLeftMouseDownPoint.y
+                    let dist = sqrt(dx * dx + dy * dy)
+                    let clickCount = event.getIntegerValueField(.mouseEventClickState)
+
+                    if clickCount >= 2 || dist > 5.0 {
+                        TranslateMonitor.shared.hasRecentSelection = true
+                        TranslateMonitor.shared.lastSelectionTime = Date()
+                    } else if clickCount == 1 && dist <= 5.0 {
+                        TranslateMonitor.shared.hasRecentSelection = false
                     }
                     return Unmanaged.passUnretained(event)
                 }
@@ -152,14 +177,23 @@ public final class TranslateMonitor {
                         return nil
                     }
 
+                    let flags = event.flags
+                    let hasCmd = flags.contains(.maskCommand)
+                    let hasAlt = flags.contains(.maskAlternate)
+                    let hasCtrl = flags.contains(.maskControl)
+                    let hasShift = flags.contains(.maskShift)
+
+                    // Track keyboard selection gestures (Shift + Arrow keys, Cmd + A)
+                    if hasShift && (keyCode >= 123 && keyCode <= 126) {
+                        TranslateMonitor.shared.hasRecentSelection = true
+                        TranslateMonitor.shared.lastSelectionTime = Date()
+                    } else if hasCmd && keyCode == 0 { // Cmd + A
+                        TranslateMonitor.shared.hasRecentSelection = true
+                        TranslateMonitor.shared.lastSelectionTime = Date()
+                    }
+
                     // Match target shortcut
                     if !TranslateMonitor.shared.isRightClickMode && keyCode == TranslateMonitor.shared.targetKeyCode {
-                        let flags = event.flags
-                        let hasCmd = flags.contains(.maskCommand)
-                        let hasAlt = flags.contains(.maskAlternate)
-                        let hasCtrl = flags.contains(.maskControl)
-                        let hasShift = flags.contains(.maskShift)
-
                         let m = TranslateMonitor.shared
                         if hasCmd == m.requireCmd && hasAlt == m.requireAlt && hasCtrl == m.requireCtrl && hasShift == m.requireShift {
                             guard let frontApp = NSWorkspace.shared.frontmostApplication else {
@@ -175,9 +209,32 @@ public final class TranslateMonitor {
                                 return Unmanaged.passUnretained(event)
                             }
 
+                            // CRITICAL INTELLIGENT DISCRIMINATION FOR UNMODIFIED KEYS (e.g. Space):
+                            // When an unmodified key like Space is pressed:
+                            // If the user has NOT performed a selection gesture (mouse drag/double-click/Shift+Arrow)
+                            // AND Accessibility does not report selected text, the user is 100% just typing!
+                            // Pass the native key event through immediately with 0 delay and NO interception.
+                            let isUnmodified = !m.requireCmd && !m.requireAlt && !m.requireCtrl && !m.requireShift
+                            if isUnmodified {
+                                let isRecent = m.hasRecentSelection && Date().timeIntervalSince(m.lastSelectionTime) < 15.0
+                                if !isRecent {
+                                    let ax = TranslateMonitor.getSelectedTextViaAccessibility()
+                                    if ax.text == nil || ax.text!.isEmpty {
+                                        // User is typing (or confirming IME candidate). Pass straight through!
+                                        return Unmanaged.passUnretained(event)
+                                    }
+                                }
+                            }
+
+                            m.hasRecentSelection = false
                             TranslateMonitor.shared.handleTrigger(shouldReplay: true)
                             return nil // Intercept native shortcut
                         }
+                    }
+
+                    // Clear selection state on non-selection typing keys
+                    if !hasShift && !hasCmd && !hasAlt && !hasCtrl && keyCode != TranslateMonitor.shared.targetKeyCode {
+                        TranslateMonitor.shared.hasRecentSelection = false
                     }
                 }
 
@@ -214,6 +271,7 @@ public final class TranslateMonitor {
     public struct AXSelectionInfo {
         public let text: String?
         public let isZeroLengthCaret: Bool
+        public let isComposingInIME: Bool
         public let isCopyExplicitlyDisabled: Bool
     }
 
@@ -223,7 +281,7 @@ public final class TranslateMonitor {
         var focusedAppVal: AnyObject?
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppVal) == .success,
               let focusedApp = focusedAppVal else {
-            return AXSelectionInfo(text: nil, isZeroLengthCaret: false, isCopyExplicitlyDisabled: false)
+            return AXSelectionInfo(text: nil, isZeroLengthCaret: false, isComposingInIME: false, isCopyExplicitlyDisabled: false)
         }
 
         let appElement = focusedApp as! AXUIElement
@@ -233,29 +291,46 @@ public final class TranslateMonitor {
         if gotFocusedElement, let focusedElement = focusedElementVal {
             let element = focusedElement as! AXUIElement
 
-            // 1. Direct selected text check
+            // 1. Check if the element is currently in IME composition / marked text mode (e.g. typing Pinyin)
+            var markedTextVal: AnyObject?
+            if AXUIElementCopyAttributeValue(element, "AXMarkedText" as CFString, &markedTextVal) == .success,
+               let str = markedTextVal as? String, !str.isEmpty {
+                return AXSelectionInfo(text: nil, isZeroLengthCaret: true, isComposingInIME: true, isCopyExplicitlyDisabled: false)
+            }
+
+            var markedRangeVal: AnyObject?
+            if AXUIElementCopyAttributeValue(element, "AXMarkedTextRange" as CFString, &markedRangeVal) == .success,
+               CFGetTypeID(markedRangeVal) == AXValueGetTypeID() {
+                let axVal = markedRangeVal as! AXValue
+                var range = CFRange()
+                if AXValueGetValue(axVal, .cfRange, &range) && range.length > 0 {
+                    return AXSelectionInfo(text: nil, isZeroLengthCaret: true, isComposingInIME: true, isCopyExplicitlyDisabled: false)
+                }
+            }
+
+            // 2. Direct selected text check
             var selectedTextVal: AnyObject?
             if AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selectedTextVal) == .success,
                let str = selectedTextVal as? String {
                 let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
-                    return AXSelectionInfo(text: trimmed, isZeroLengthCaret: false, isCopyExplicitlyDisabled: false)
+                    return AXSelectionInfo(text: trimmed, isZeroLengthCaret: false, isComposingInIME: false, isCopyExplicitlyDisabled: false)
                 }
             }
 
-            // 2. Caret range check: if length == 0, caret is blinking in an input area with nothing selected
+            // 3. Caret range check: if length == 0, caret is blinking in an input area with nothing selected
             var selectedRangeVal: AnyObject?
             if AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &selectedRangeVal) == .success,
                CFGetTypeID(selectedRangeVal) == AXValueGetTypeID() {
                 let axVal = selectedRangeVal as! AXValue
                 var range = CFRange()
                 if AXValueGetValue(axVal, .cfRange, &range) && range.length == 0 {
-                    return AXSelectionInfo(text: nil, isZeroLengthCaret: true, isCopyExplicitlyDisabled: false)
+                    return AXSelectionInfo(text: nil, isZeroLengthCaret: true, isComposingInIME: false, isCopyExplicitlyDisabled: false)
                 }
             }
         }
 
-        // 3. Inspect application menu bar Edit -> Copy item to see if Copy is explicitly disabled
+        // 4. Inspect application menu bar Edit -> Copy item to see if Copy is explicitly disabled
         var copyDisabled = false
         var menuBarVal: AnyObject?
         if AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBarVal) == .success,
@@ -282,7 +357,7 @@ public final class TranslateMonitor {
             }
         }
 
-        return AXSelectionInfo(text: nil, isZeroLengthCaret: false, isCopyExplicitlyDisabled: copyDisabled)
+        return AXSelectionInfo(text: nil, isZeroLengthCaret: false, isComposingInIME: false, isCopyExplicitlyDisabled: copyDisabled)
     }
 
     private static func copyAttribute(_ element: AXUIElement, _ attribute: String) -> AnyObject? {
@@ -364,36 +439,38 @@ public final class TranslateMonitor {
         isDetecting = true
 
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            guard let self = self else { return }
             defer {
-                self?.isDetecting = false
+                self.isDetecting = false
             }
 
             // 1. Try Accessibility API first (silent, zero pasteboard interference, no NSBeep)
             let axInfo = TranslateMonitor.getSelectedTextViaAccessibility()
-            if let text = axInfo.text, !text.isEmpty {
-                self?.triggerDirectTranslation(text: text, frontPid: frontPid)
-                return
-            }
 
-            // 2. If caret is blinking in an input box with 0-length selection, user is just typing
-            if axInfo.isZeroLengthCaret {
+            // If user is currently composing in an IME or caret is zero-length, user is simply typing
+            if axInfo.isComposingInIME || axInfo.isZeroLengthCaret {
                 if shouldReplay {
-                    self?.replayTargetKey()
+                    self.replayTargetKey()
                 }
                 return
             }
 
-            // 3. If Copy menu item is explicitly disabled, Cmd+C will cause macOS NSBeep alert sound!
+            if let text = axInfo.text, !text.isEmpty {
+                self.triggerDirectTranslation(text: text, frontPid: frontPid)
+                return
+            }
+
+            // 2. If Copy menu item is explicitly disabled, Cmd+C will cause macOS NSBeep alert sound!
             if axInfo.isCopyExplicitlyDisabled {
                 if shouldReplay {
-                    self?.replayTargetKey()
+                    self.replayTargetKey()
                 }
                 return
             }
 
-            // 4. Fallback: only simulate Cmd+C when AX could not determine selection (e.g. non-standard views)
+            // 3. Fallback: simulate Cmd+C to read selection from Electron / web / non-standard apps (e.g. VS Code, Chrome)
             let oldChangeCount = NSPasteboard.general.changeCount
-            self?.simulateCmdC()
+            self.simulateCmdC()
 
             let start = Date()
             var detectedNewText = false
@@ -408,14 +485,14 @@ public final class TranslateMonitor {
             if detectedNewText, let rawStr = NSPasteboard.general.string(forType: .string) {
                 let trimmed = rawStr.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
-                    self?.triggerDirectTranslation(text: trimmed, frontPid: frontPid)
+                    self.triggerDirectTranslation(text: trimmed, frontPid: frontPid)
                     return
                 }
             }
 
             // If no text selected, replay native key to avoid dropping key press
             if shouldReplay {
-                self?.replayTargetKey()
+                self.replayTargetKey()
             }
         }
     }

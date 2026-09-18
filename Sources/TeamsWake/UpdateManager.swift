@@ -31,7 +31,7 @@ public final class UpdateManager: NSObject, ObservableObject {
     ]
 
     public var localVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     }
 
     public var localCommit: String {
@@ -40,6 +40,10 @@ public final class UpdateManager: NSObject, ObservableObject {
 
     public var localCommitDate: String {
         Bundle.main.infoDictionary?["GitCommitDate"] as? String ?? ""
+    }
+
+    public var localCommitMessage: String {
+        Bundle.main.infoDictionary?["GitCommitMessage"] as? String ?? ""
     }
 
     private override init() {

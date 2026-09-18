@@ -39,7 +39,7 @@
 
 ## 📥 下载与使用
 
-1. 从 [GitHub Releases](https://github.com/linrol/teams-wake/releases) 下载最新的 `TeamsWake-2.0.0.dmg`；
+1. 从 [GitHub Releases](https://github.com/linrol/teams-wake/releases) 下载最新的 `TeamsWake-2.0.1.dmg`；
 2. 打开 DMG 并将 `TeamsWake.app` 拖拽至 `Applications`（应用程序）文件夹；
 3. **⚠️ macOS 15 (Sequoia) 首次打开提示“已损坏”或“无法打开”？**  
    由于个人开源软件未购买苹果年费企业公证，macOS 15 门禁机制较严格。若提示无法打开，只需在终端（Terminal）执行一行命令清除网络下载隔离标记即可：
@@ -66,7 +66,7 @@
 ### 2. 正式版本打包发布（Universal 2 双架构 + 自动发布）
 ```bash
 # 发布指定版本号（若远端该版本已存在则自动覆盖，不存在则新建）
-./scripts/release.sh 2.0.1
+./scripts/release.sh 2.0.0
 
 # 默认发布当前版本
 ./scripts/release.sh
