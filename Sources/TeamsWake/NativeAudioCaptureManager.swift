@@ -67,6 +67,7 @@ public actor LocalSenseVoiceEngine {
     public static let shared = LocalSenseVoiceEngine()
     private var manager: SenseVoiceManager?
     private var isInitializing = false
+    private var hasWarmedUp = false
 
     public func initializeIfNeeded(progressHandler: ProgressHandler? = nil) async throws {
         if manager != nil { return }
@@ -81,6 +82,15 @@ public actor LocalSenseVoiceEngine {
         let mgr = try await SenseVoiceManager.load(precision: .int8, progressHandler: progressHandler)
         self.manager = mgr
         NSLog("[LocalSenseVoiceEngine] 🚀 SenseVoice local neural engine loaded successfully!")
+
+        // Muesli-style ANE warmup: compile Neural Engine computation graph with silent audio
+        if !hasWarmedUp {
+            NSLog("[LocalSenseVoiceEngine] Warming up Neural Engine (ANE) with silent buffer...")
+            let silence = [Float](repeating: 0, count: 16_000)
+            _ = try? await mgr.transcribe(audio: silence)
+            hasWarmedUp = true
+            NSLog("[LocalSenseVoiceEngine] ⚡️ ANE Warmup complete! Next inferences will be instant.")
+        }
     }
 
     public func transcribe(samples: [Float]) async throws -> String {
@@ -113,7 +123,7 @@ public actor LocalSenseVoiceEngine {
     }
 }
 
-// MARK: - Audio Stream Transcriber (VAD Energy Detection + 800ms Smart Pause Chunking)
+// MARK: - Audio Stream Transcriber (Low-Latency Adaptive VAD & Smart Pause Chunking)
 public final class AudioStreamTranscriber: @unchecked Sendable {
     public let label: String
     public var onCommitSentence: (@Sendable (String) -> Void)?
@@ -122,8 +132,14 @@ public final class AudioStreamTranscriber: @unchecked Sendable {
     private var lastSpeechTime: Date = Date.distantPast
     private var hasVoiceActivity: Bool = false
     private var silenceTimer: Timer?
-    private let silenceThreshold: TimeInterval = 0.8
-    private let voiceRmsThreshold: Float = 0.018 // Raised threshold to filter electromagnetic/board floor noise
+
+    // Low-latency timing parameters (inspired by Muesli streaming ASR)
+    private let silenceThreshold: TimeInterval = 0.45 // Fast punctuation/pause cut (down from 0.8s)
+    private let shortPauseThreshold: TimeInterval = 0.25 // Quick pause cut when buffer is already long
+    private let targetSegmentSamples: Int = 16000 * 3 // 3s target segment length
+    private let maxContinuousSamples: Int = 16000 * 5 // 5s hard cap for continuous non-stop speech
+    private let minSpeechSamples: Int = 4800 // 300ms minimum speech length
+    private let voiceRmsThreshold: Float = 0.016 // Sensitivity threshold tuned for natural speech
 
     public private(set) var isRunning: Bool = false
     private let lock = NSLock()
@@ -178,49 +194,48 @@ public final class AudioStreamTranscriber: @unchecked Sendable {
 
         if hasVoiceActivity || !accumulatedSamples.isEmpty {
             accumulatedSamples.append(contentsOf: floats)
-            // Prevent single sentence from being too long (e.g. force cut at 15s)
-            if accumulatedSamples.count >= 16000 * 15 {
-                commitAndTranscribe()
+            // Hard limit: if continuous non-stop talking reaches 5s, commit chunk immediately
+            if accumulatedSamples.count >= maxContinuousSamples {
+                commitAndTranscribeLocked()
             }
         }
     }
 
     private func startSilenceWatcher() {
         silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+        // High responsiveness: 80ms poll interval
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             self.lock.lock()
             guard self.isRunning, self.hasVoiceActivity else {
                 self.lock.unlock()
                 return
             }
-            let elapsed = Date().timeIntervalSince(self.lastSpeechTime)
+            let elapsedSilence = Date().timeIntervalSince(self.lastSpeechTime)
             let sampleCount = self.accumulatedSamples.count
-            self.lock.unlock()
 
-            // Commit on 800ms silence and >= 0.4s (6400 samples) speech
-            if elapsed >= self.silenceThreshold && sampleCount >= 6400 {
-                self.commitAndTranscribe()
-            } else if elapsed >= 2.5 && sampleCount < 6400 {
-                // If noise and silent for > 2.5s, reset buffer
-                self.lock.lock()
+            // 1. Natural sentence ending: >= 450ms silence and >= 300ms valid speech
+            if elapsedSilence >= self.silenceThreshold && sampleCount >= self.minSpeechSamples {
+                self.commitAndTranscribeLocked()
+            }
+            // 2. Continuous speech slicing: buffer >= 3s and minor pause >= 250ms
+            else if sampleCount >= self.targetSegmentSamples && elapsedSilence >= self.shortPauseThreshold {
+                self.commitAndTranscribeLocked()
+            }
+            // 3. Drop transient noise spike if silence exceeds 1.8s and speech too short
+            else if elapsedSilence >= 1.8 && sampleCount < self.minSpeechSamples {
                 self.accumulatedSamples.removeAll()
                 self.hasVoiceActivity = false
-                self.lock.unlock()
             }
+            self.lock.unlock()
         }
     }
 
-    private func commitAndTranscribe() {
-        lock.lock()
-        guard isRunning, !accumulatedSamples.isEmpty else {
-            lock.unlock()
-            return
-        }
+    private func commitAndTranscribeLocked() {
+        guard isRunning, !accumulatedSamples.isEmpty else { return }
         let chunk = accumulatedSamples
         accumulatedSamples.removeAll()
         hasVoiceActivity = false
-        lock.unlock()
 
         // Check average energy to silently drop floating noise (RMS < 0.015)
         var sumSq: Float = 0
@@ -228,7 +243,7 @@ public final class AudioStreamTranscriber: @unchecked Sendable {
         let chunkRms = sqrt(sumSq / Float(chunk.count))
         guard chunkRms >= 0.015 else { return }
 
-        Task.detached { [weak self, chunk, label = self.label] in
+        Task.detached(priority: .userInitiated) { [weak self, chunk, label = self.label] in
             do {
                 let text = try await LocalSenseVoiceEngine.shared.transcribe(samples: chunk)
                 if !text.isEmpty {
@@ -252,6 +267,7 @@ public final class RemoteProcessTapEngine: @unchecked Sendable {
     private var audioFormat: AVAudioFormat?
     private var packetCount: Int = 0
     private let resampler = Mono16kResampler()
+    private let processingQueue = DispatchQueue(label: "com.teams-wake.remote-tap-proc", qos: .userInteractive)
     public var onPCMSamples: (([Float]) -> Void)?
     public private(set) var isRunning: Bool = false
 
@@ -455,20 +471,26 @@ public final class RemoteProcessTapEngine: @unchecked Sendable {
             monoSamples = Array(UnsafeBufferPointer(start: ptr, count: frameCount))
         }
 
-        packetCount += 1
-        if packetCount % 50 == 0 {
-            let sampleCount = min(monoSamples.count, 160)
-            if sampleCount > 0 {
-                let sumSquares = monoSamples[0..<sampleCount].reduce(Float(0)) { $0 + $1 * $1 }
-                let rms = sqrt(sumSquares / Float(sampleCount))
-                if rms > 0.005 {
-                    NSLog("[RemoteProcessTapEngine] 🔊 Received remote audio signal (RMS: %.4f, samples: %d)", rms, monoSamples.count)
+        guard !monoSamples.isEmpty else { return }
+
+        processingQueue.async { [weak self] in
+            guard let self = self, self.isRunning else { return }
+
+            self.packetCount += 1
+            if self.packetCount % 50 == 0 {
+                let sampleCount = min(monoSamples.count, 160)
+                if sampleCount > 0 {
+                    let sumSquares = monoSamples[0..<sampleCount].reduce(Float(0)) { $0 + $1 * $1 }
+                    let rms = sqrt(sumSquares / Float(sampleCount))
+                    if rms > 0.005 {
+                        NSLog("[RemoteProcessTapEngine] 🔊 Received remote audio signal (RMS: %.4f, samples: %d)", rms, monoSamples.count)
+                    }
                 }
             }
-        }
 
-        if let resampledFloats = resampler.resample(floats: monoSamples, sampleRate: sampleRate) {
-            onPCMSamples?(resampledFloats)
+            if let resampledFloats = self.resampler.resample(floats: monoSamples, sampleRate: sampleRate) {
+                self.onPCMSamples?(resampledFloats)
+            }
         }
     }
 }
@@ -482,6 +504,7 @@ public final class LocalMicHalEngine: @unchecked Sendable {
     private var audioFormat: AVAudioFormat?
     private var packetCount: Int = 0
     private let resampler = Mono16kResampler()
+    private let processingQueue = DispatchQueue(label: "com.teams-wake.local-mic-proc", qos: .userInteractive)
     public var onPCMSamples: (([Float]) -> Void)?
     public private(set) var isRunning: Bool = false
 
@@ -589,20 +612,26 @@ public final class LocalMicHalEngine: @unchecked Sendable {
             monoSamples = Array(UnsafeBufferPointer(start: ptr, count: frameCount))
         }
 
-        packetCount += 1
-        if packetCount % 50 == 0 {
-            let sampleCount = min(monoSamples.count, 160)
-            if sampleCount > 0 {
-                let sumSquares = monoSamples[0..<sampleCount].reduce(Float(0)) { $0 + $1 * $1 }
-                let rms = sqrt(sumSquares / Float(sampleCount))
-                if rms > 0.005 {
-                    NSLog("[LocalMicHalEngine] 🎤 Received microphone audio signal (RMS: %.4f, samples: %d)", rms, monoSamples.count)
+        guard !monoSamples.isEmpty else { return }
+
+        processingQueue.async { [weak self] in
+            guard let self = self, self.isRunning else { return }
+
+            self.packetCount += 1
+            if self.packetCount % 50 == 0 {
+                let sampleCount = min(monoSamples.count, 160)
+                if sampleCount > 0 {
+                    let sumSquares = monoSamples[0..<sampleCount].reduce(Float(0)) { $0 + $1 * $1 }
+                    let rms = sqrt(sumSquares / Float(sampleCount))
+                    if rms > 0.005 {
+                        NSLog("[LocalMicHalEngine] 🎤 Received microphone audio signal (RMS: %.4f, samples: %d)", rms, monoSamples.count)
+                    }
                 }
             }
-        }
 
-        if let resampledFloats = resampler.resample(floats: monoSamples, sampleRate: sampleRate) {
-            onPCMSamples?(resampledFloats)
+            if let resampledFloats = self.resampler.resample(floats: monoSamples, sampleRate: sampleRate) {
+                self.onPCMSamples?(resampledFloats)
+            }
         }
     }
 }
