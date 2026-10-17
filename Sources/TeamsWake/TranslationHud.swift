@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Translation
+import AVFoundation
 
 public struct TranslationHudData: Identifiable {
     public let id = UUID()
@@ -67,7 +68,7 @@ public final class TranslationHudController: NSObject {
     private var panel: NonActivatingPanel?
     private var hostingView: ClickThroughHostingView<TranslationHudView>?
     private var dismissTimer: Timer?
-    private var speechSynthesizer: NSSpeechSynthesizer?
+    private var speechSynthesizer: AVSpeechSynthesizer?
 
     private override init() {
         super.init()
@@ -79,13 +80,14 @@ public final class TranslationHudController: NSObject {
 
     public func toggleSpeech(for text: String) {
         if speechSynthesizer == nil {
-            speechSynthesizer = NSSpeechSynthesizer()
+            speechSynthesizer = AVSpeechSynthesizer()
         }
         guard let synth = speechSynthesizer else { return }
         if synth.isSpeaking {
-            synth.stopSpeaking()
+            synth.stopSpeaking(at: .immediate)
         } else {
-            synth.startSpeaking(text)
+            let utterance = AVSpeechUtterance(string: text)
+            synth.speak(utterance)
         }
     }
 
@@ -140,7 +142,7 @@ public final class TranslationHudController: NSObject {
     public func showLoading(original: String, targetPid: pid_t, forcedDirection: String? = nil, at point: CGPoint? = nil) {
         dismissTimer?.invalidate()
         dismissTimer = nil
-        speechSynthesizer?.stopSpeaking()
+        speechSynthesizer?.stopSpeaking(at: .immediate)
 
         let direction: String
         if let forced = forcedDirection {
@@ -190,7 +192,7 @@ public final class TranslationHudController: NSObject {
     public func show(original: String, translated: String, direction: String, provider: String, targetPid: pid_t, at point: CGPoint? = nil) {
         dismissTimer?.invalidate()
         dismissTimer = nil
-        speechSynthesizer?.stopSpeaking()
+        speechSynthesizer?.stopSpeaking(at: .immediate)
 
         model.original = original
         model.translated = translated
@@ -322,7 +324,7 @@ public final class TranslationHudController: NSObject {
         TranslateMonitor.isHudVisible = false
         TranslateMonitor.cachedHudFrame = .zero
         TranslateMonitor.shared.cancelCurrentTranslation()
-        speechSynthesizer?.stopSpeaking()
+        speechSynthesizer?.stopSpeaking(at: .immediate)
 
         // Smooth fade-out animation
         NSAnimationContext.runAnimationGroup({ ctx in
