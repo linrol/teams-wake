@@ -32,3 +32,6 @@ Temporary Items
 # Dist artifacts
 dist/
 *.log
+
+# IDE
+.idea/

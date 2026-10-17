@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "TeamsWake",
     platforms: [
-        .macOS(.v14)
+        .macOS("14.2")
     ],
     products: [
         .executable(
@@ -12,18 +12,25 @@ let package = Package(
             targets: ["TeamsWake"]
         )
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.5")
+    ],
     targets: [
         .executableTarget(
             name: "TeamsWake",
-            dependencies: [],
+            dependencies: [
+                .product(name: "FluidAudio", package: "FluidAudio")
+            ],
             path: "Sources/TeamsWake",
             linkerSettings: [
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("IOKit"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("ApplicationServices"),
-                .linkedFramework("Translation")
+                .linkedFramework("Translation"),
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("AudioToolbox"),
+                .linkedFramework("AVFoundation")
             ]
         )
     ]

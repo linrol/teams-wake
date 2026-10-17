@@ -75,6 +75,12 @@ cat <<EOF > "$CONTENTS_DIR/Info.plist"
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Teams Wake requires microphone access to capture and transcribe local voice.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Teams Wake requires speech recognition permission to transcribe speech into text.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Teams Wake requires audio capture permission to tap remote call audio for real-time transcription.</string>
 </dict>
 </plist>
 EOF
