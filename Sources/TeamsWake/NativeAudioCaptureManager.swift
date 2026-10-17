@@ -119,7 +119,52 @@ public actor LocalSenseVoiceEngine {
             return ""
         }
 
-        return cleanText
+        return TranscriptionEngineArtifactsFilter.filter(cleanText)
+    }
+}
+
+// MARK: - Transcription Artifacts & Control Tag Filter
+public struct TranscriptionEngineArtifactsFilter {
+    private static let artifactPatterns: [String] = [
+        // Control tags: e.g. <|nospeech|>, <|laughter|>, <|applause|>, <|music|>, <|zh|>, etc.
+        #"<\|[^|<>]*\|>"#,
+        // Bracketed non-speech annotations: [laughter], [music], (applause), etc.
+        #"(?i)\[\s*(?:blank[_\s-]*audio|no[_\s-]*speech|silence|inaudible|music|applause|laughter|screaming|cheering)\s*\]"#,
+        #"(?i)\(\s*(?:blank[_\s-]*audio|no[_\s-]*speech|silence|inaudible|music|applause|laughter)\s*\)"#,
+        // Special tokens
+        #"(?i)<\s*(?:eou|eob|unk|blank|pad)\s*>"#
+    ]
+
+    private static let fillerTokens: Set<String> = [
+        "uh", "um", "uhh", "umm", "err", "ah", "ahh", "hmm", "hm", "mm", "mmm"
+    ]
+
+    public static func filter(_ text: String) -> String {
+        guard !text.isEmpty else { return "" }
+        var result = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 1. Remove control tags and bracketed non-speech annotations
+        for pattern in artifactPatterns {
+            result = result.replacingOccurrences(of: pattern, with: " ", options: .regularExpression)
+        }
+
+        // 2. Collapse redundant spaces
+        result = result.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 3. Drop isolated filler tokens
+        let lower = result.lowercased()
+        if fillerTokens.contains(lower) {
+            return ""
+        }
+
+        // 4. Drop if only punctuation characters left
+        let strippedPunct = result.trimmingCharacters(in: .punctuationCharacters.union(.whitespacesAndNewlines))
+        if strippedPunct.isEmpty {
+            return ""
+        }
+
+        return result
     }
 }
 
@@ -790,6 +835,13 @@ private final class DownloadProgressThrottler: @unchecked Sendable {
                 }
 
                 self.isRunning = true
+                // Start monitoring audio hardware route changes (e.g. AirPods/Headphone plugged/unplugged)
+                AudioRouteWatchdog.shared.startWatching {
+                    Task { @MainActor in
+                        NativeAudioCaptureManager.shared.handleRouteChanged()
+                    }
+                }
+
                 switch self.listenMode {
                 case .bidirectional:
                     AppState.shared.addLog(message: "🚀 Bidirectional SenseVoice offline audio monitor started! (Remote Tap + Local Mic)", type: .success)
@@ -808,6 +860,8 @@ private final class DownloadProgressThrottler: @unchecked Sendable {
     }
 
     public func stopCapture() {
+        AudioRouteWatchdog.shared.stopWatching()
+
         RemoteProcessTapEngine.shared.stop()
         RemoteProcessTapEngine.shared.onPCMSamples = nil
         remoteTranscriber?.stop()
@@ -820,5 +874,111 @@ private final class DownloadProgressThrottler: @unchecked Sendable {
 
         isRunning = false
         AppState.shared.addLog(message: "Audio capture stopped", type: .warning)
+    }
+
+    /// Smoothly re-anchors audio capture streams when system default input or output changes
+    public func handleRouteChanged() {
+        guard isRunning else { return }
+        AppState.shared.addLog(message: "[Audio] Hardware route changed, re-anchoring audio stream...", type: .info)
+
+        // Stop current hardware capture instances
+        RemoteProcessTapEngine.shared.stop()
+        RemoteProcessTapEngine.shared.onPCMSamples = nil
+        LocalMicHalEngine.shared.stop()
+        LocalMicHalEngine.shared.onPCMSamples = nil
+
+        // Re-anchor taps with new default hardware devices
+        let shouldCaptureRemote = (self.listenMode == .remoteOnly || self.listenMode == .bidirectional)
+        let shouldCaptureLocal = (self.listenMode == .localOnly || self.listenMode == .bidirectional)
+
+        if shouldCaptureRemote, let remoteTrans = self.remoteTranscriber {
+            RemoteProcessTapEngine.shared.onPCMSamples = { [weak remoteTrans] samples in
+                remoteTrans?.appendAudioSamples(samples)
+            }
+            try? RemoteProcessTapEngine.shared.start()
+        }
+
+        if shouldCaptureLocal, let localTrans = self.localTranscriber {
+            LocalMicHalEngine.shared.onPCMSamples = { [weak localTrans] samples in
+                localTrans?.appendAudioSamples(samples)
+            }
+            try? LocalMicHalEngine.shared.start()
+        }
+    }
+}
+
+// MARK: - Audio Route Migration Watchdog
+public final class AudioRouteWatchdog: @unchecked Sendable {
+    public static let shared = AudioRouteWatchdog()
+
+    private let queue = DispatchQueue(label: "com.teams-wake.audio-watchdog", qos: .utility)
+    private var isWatching = false
+    private var debounceWorkItem: DispatchWorkItem?
+    private var defaultInputListener: AudioObjectPropertyListenerBlock?
+    private var defaultOutputListener: AudioObjectPropertyListenerBlock?
+
+    private init() {}
+
+    public func startWatching(onRouteChange: @escaping @Sendable () -> Void) {
+        queue.async { [weak self] in
+            guard let self = self, !self.isWatching else { return }
+            self.isWatching = true
+
+            let listener: AudioObjectPropertyListenerBlock = { _, _ in
+                self.queue.async {
+                    self.debounceWorkItem?.cancel()
+                    let item = DispatchWorkItem {
+                        onRouteChange()
+                    }
+                    self.debounceWorkItem = item
+                    self.queue.asyncAfter(deadline: .now() + 0.5, execute: item)
+                }
+            }
+
+            self.defaultInputListener = listener
+            self.defaultOutputListener = listener
+
+            var inputAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var outputAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+
+            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &inputAddr, self.queue, listener)
+            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &outputAddr, self.queue, listener)
+        }
+    }
+
+    public func stopWatching() {
+        queue.async { [weak self] in
+            guard let self = self, self.isWatching else { return }
+            self.isWatching = false
+            self.debounceWorkItem?.cancel()
+
+            if let inputListener = self.defaultInputListener {
+                var inputAddr = AudioObjectPropertyAddress(
+                    mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                    mScope: kAudioObjectPropertyScopeGlobal,
+                    mElement: kAudioObjectPropertyElementMain
+                )
+                AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &inputAddr, self.queue, inputListener)
+                self.defaultInputListener = nil
+            }
+
+            if let outputListener = self.defaultOutputListener {
+                var outputAddr = AudioObjectPropertyAddress(
+                    mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+                    mScope: kAudioObjectPropertyScopeGlobal,
+                    mElement: kAudioObjectPropertyElementMain
+                )
+                AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &outputAddr, self.queue, outputListener)
+                self.defaultOutputListener = nil
+            }
+        }
     }
 }
