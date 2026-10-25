@@ -13,12 +13,14 @@ let package = Package(
         )
     ],
     dependencies: [
+        .package(path: "../swapr-trans"),
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.5")
     ],
     targets: [
         .executableTarget(
             name: "TeamsWake",
             dependencies: [
+                .product(name: "SwaprTransKit", package: "swapr-trans"),
                 .product(name: "FluidAudio", package: "FluidAudio")
             ],
             path: "Sources/TeamsWake",

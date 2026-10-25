@@ -21,12 +21,11 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 killall TeamsWake 2>/dev/null || true
 sleep 0.5
 
-# 3. Recreate App Bundle in /Applications
-rm -rf "$APP_DEST"
+# 3. In-place update App Bundle (preserve directory inode to maintain macOS TCC permissions)
 mkdir -p "$MACOS_DIR"
 mkdir -p "$RESOURCES_DIR"
 
-cp "$BIN_PATH" "$MACOS_DIR/TeamsWake"
+cp -f "$BIN_PATH" "$MACOS_DIR/TeamsWake"
 chmod +x "$MACOS_DIR/TeamsWake"
 
 if [ -f "$REPO_ROOT/assets/AppIcon.icns" ]; then
@@ -90,13 +89,15 @@ xattr -cr "$APP_DEST"
 
 # 5. Code signing (using persistent certificate to maintain TCC accessibility permission)
 echo "Signing /Applications/TeamsWake.app..."
+DR_REQ='designated => identifier "com.linrol.TeamsWake"'
+
 if security find-identity -v -p codesigning | grep -q "Teams Wake Dev"; then
     echo "Found signing identity: Teams Wake Dev"
-    codesign --force --deep --sign "Teams Wake Dev" "$APP_DEST"
+    codesign --force --deep -r="$DR_REQ" --sign "Teams Wake Dev" "$APP_DEST"
 elif security find-identity -v -p codesigning | grep -q "Apple Development"; then
     IDENTITY=$(security find-identity -v -p codesigning | grep "Apple Development" | head -n 1 | awk -F '"' '{print $2}')
     echo "Found signing identity: $IDENTITY"
-    codesign --force --deep --sign "$IDENTITY" "$APP_DEST"
+    codesign --force --deep -r="$DR_REQ" --sign "$IDENTITY" "$APP_DEST"
 else
     echo "Using ad-hoc signature (-s -)..."
     codesign --force --deep --sign - "$APP_DEST"

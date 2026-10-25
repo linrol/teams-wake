@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwaprTransKit
 
 public enum LogType: String, Codable {
     case info
@@ -61,12 +62,6 @@ public final class AppState: ObservableObject {
     private let keyInterval = "teams_wake_interval"
     private let keyScheduleEnabled = "teams_wake_schedule_enabled"
     private let keySchedules = "teams_wake_schedules"
-    private let keyAutoTranslate = "teams_wake_auto_translate"
-    private let keyTranslationProvider = "teams_wake_translation_provider"
-    private let keyTranslationShortcut = "teams_wake_translation_shortcut"
-    private let keyTranslationDismissSeconds = "teams_wake_translation_dismiss_seconds"
-    private let keyHudOpacity = "teams_wake_hud_opacity"
-
     @Published public var isActive: Bool = false {
         didSet {
             handleActiveStateChanged()
@@ -94,43 +89,29 @@ public final class AppState: ObservableObject {
         }
     }
 
-    @Published public var isAutoTranslateActive: Bool = false {
-        didSet {
-            defaults.set(isAutoTranslateActive, forKey: keyAutoTranslate)
-            handleAutoTranslateChanged()
-        }
+    public var isAutoTranslateActive: Bool {
+        get { SwaprTransConfig.shared.isEnabled }
+        set { SwaprTransConfig.shared.isEnabled = newValue }
     }
 
-    @Published public var translationProvider: TranslationProvider = .apple {
-        didSet {
-            defaults.set(translationProvider.rawValue, forKey: keyTranslationProvider)
-            addLog(message: "Translation provider changed to: \(translationProvider.displayName)", type: .info)
-        }
+    public var translationProvider: TranslationProvider {
+        get { SwaprTransConfig.shared.provider }
+        set { SwaprTransConfig.shared.provider = newValue }
     }
 
-    @Published public var translationShortcut: TranslationShortcut = .defaultShortcut {
-        didSet {
-            if let data = try? JSONEncoder().encode(translationShortcut) {
-                defaults.set(data, forKey: keyTranslationShortcut)
-            }
-            if isAutoTranslateActive {
-                TranslateMonitor.shared.restartMonitoring(with: translationShortcut)
-            }
-            addLog(message: "Translation shortcut updated to: \(translationShortcut.label)", type: .info)
-        }
+    public var translationShortcut: TranslationShortcut {
+        get { SwaprTransConfig.shared.shortcut }
+        set { SwaprTransConfig.shared.shortcut = newValue }
     }
 
-    @Published public var translationDismissSeconds: Int = 0 {
-        didSet {
-            defaults.set(translationDismissSeconds, forKey: keyTranslationDismissSeconds)
-        }
+    public var translationDismissSeconds: Int {
+        get { SwaprTransConfig.shared.autoDismissSeconds }
+        set { SwaprTransConfig.shared.autoDismissSeconds = newValue }
     }
 
-    @Published public var hudOpacity: Double = 0.85 {
-        didSet {
-            defaults.set(hudOpacity, forKey: keyHudOpacity)
-            TranslationHudController.shared.updateOpacity(hudOpacity)
-        }
+    public var hudOpacity: Double {
+        get { SwaprTransConfig.shared.hudOpacity }
+        set { SwaprTransConfig.shared.hudOpacity = newValue }
     }
 
     @Published public var logs: [LogItem] = []
@@ -163,78 +144,26 @@ public final class AppState: ObservableObject {
             ]
         }
 
-        let savedAutoTranslate = defaults.bool(forKey: keyAutoTranslate)
-        self.isAutoTranslateActive = savedAutoTranslate
-
-        if let savedProviderRaw = defaults.string(forKey: keyTranslationProvider),
-           let p = TranslationProvider(rawValue: savedProviderRaw) {
-            self.translationProvider = p
-        }
-
-        if let shortcutData = defaults.data(forKey: keyTranslationShortcut),
-           let sc = try? JSONDecoder().decode(TranslationShortcut.self, from: shortcutData) {
-            if let matched = TranslationShortcut.presets.first(where: { $0.keyCode == sc.keyCode && $0.modifiers == sc.modifiers }) {
-                self.translationShortcut = matched
-            } else {
-                self.translationShortcut = sc
-            }
-        }
-
-        if defaults.object(forKey: "teams_wake_translation_dismiss_initialized_v2") == nil {
-            self.translationDismissSeconds = 0
-            defaults.set(0, forKey: keyTranslationDismissSeconds)
-            defaults.set(true, forKey: "teams_wake_translation_dismiss_initialized_v2")
-        } else {
-            let savedDismiss = defaults.integer(forKey: keyTranslationDismissSeconds)
-            self.translationDismissSeconds = defaults.object(forKey: keyTranslationDismissSeconds) != nil ? savedDismiss : 0
-        }
-
-        let savedOpacity = defaults.double(forKey: keyHudOpacity)
-        self.hudOpacity = defaults.object(forKey: keyHudOpacity) != nil ? savedOpacity : 0.75
-
         checkPermission()
         setupScheduleMonitoring()
         addLog(message: "Teams Wake native daemon ready", type: .info)
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            if self.isAutoTranslateActive && self.hasAccessibilityPermission {
-                TranslateMonitor.shared.startMonitoring(with: self.translationShortcut)
-                self.addLog(message: "Auto translation monitor activated on launch (Shortcut: \(self.translationShortcut.label))", type: .info)
+        // Configure SwaprTrans integration
+        SwaprTransConfig.shared.ignoredAppNameKeywords.insert("teams")
+        SwaprTransConfig.shared.logHandler = { [weak self] message, level in
+            let type: LogType
+            switch level {
+            case .info: type = .info
+            case .success: type = .success
+            case .warning: type = .warning
+            case .error: type = .error
             }
-
-            // Check if Apple Native Translation model is installed
-            if self.translationProvider == .apple {
-                Task { @MainActor in
-                    let status = await AppleTranslationChecker.checkStatus()
-                    if status != .installed {
-                        self.addLog(message: "[Translation] Apple on-device model not downloaded yet, defaulting to Microsoft (Edge)", type: .warning)
-                        self.translationProvider = .microsoft
-                    }
-                }
-            }
+            self?.addLog(message: message, type: type)
         }
     }
 
     public func toggleAutoTranslate() {
-        checkPermission()
-        if !hasAccessibilityPermission {
-            addLog(message: "Accessibility permission required to enable auto translation", type: .error)
-            requestPermission()
-            return
-        }
-        isAutoTranslateActive.toggle()
-    }
-
-    private func handleAutoTranslateChanged() {
-        if isAutoTranslateActive {
-            TranslateMonitor.shared.startMonitoring(with: translationShortcut)
-            addLog(message: "Auto translation service started (Trigger shortcut: \(translationShortcut.label))", type: .success)
-        } else {
-            TranslateMonitor.shared.stopMonitoring()
-            TranslationHudController.shared.hide()
-            addLog(message: "Auto translation service stopped", type: .warning)
-        }
+        SwaprTransConfig.shared.toggleEnabled()
     }
 
     public func addLog(message: String, type: LogType = .info) {

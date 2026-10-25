@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import SwaprTransKit
 
 public struct MenuBarPopup: View {
     @ObservedObject var state = AppState.shared
@@ -12,7 +13,6 @@ public struct MenuBarPopup: View {
     @State private var newEndTime: String = "22:00"
     @State private var isLogsCopied: Bool = false
     @State private var isVersionCopied: Bool = false
-    @State private var modelDownloadWarning: String? = nil
 
     public init() {}
 
@@ -32,8 +32,8 @@ public struct MenuBarPopup: View {
             // MARK: - Schedule Section
             scheduleCard
 
-            // MARK: - Auto-Translate Section
-            translationCard
+            // MARK: - Auto-Translate Section (Powered by SwaprTransKit)
+            SwaprTransSettingsView()
 
             // MARK: - Native Audio Capture Section
             audioCaptureCard
@@ -321,199 +321,6 @@ public struct MenuBarPopup: View {
         )
     }
 
-    private var translationCard: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                HStack(spacing: 5) {
-                    Image(systemName: "character.book.closed.fill")
-                        .font(.system(size: 13))
-                        .foregroundColor(.accentColor)
-                    Text("Auto Translation")
-                        .font(.system(size: 12, weight: .medium))
-                }
-
-                Spacer()
-
-                Toggle("", isOn: Binding(
-                    get: { state.isAutoTranslateActive },
-                    set: { _ in state.toggleAutoTranslate() }
-                ))
-                .toggleStyle(SwitchToggleStyle(tint: .accentColor))
-                .labelsHidden()
-                .controlSize(.mini)
-            }
-
-            if state.isAutoTranslateActive {
-                VStack(spacing: 5) {
-                    // Shortcut selection
-                    HStack {
-                        Text("Shortcut:")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-
-                        Spacer()
-
-                        Picker("", selection: $state.translationShortcut) {
-                            ForEach(TranslationShortcut.presets) { sc in
-                                Text(sc.label).tag(sc)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .controlSize(.mini)
-                    }
-
-                    // Provider selection
-                    HStack {
-                        Text("Provider:")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-
-                        Spacer()
-
-                        Picker("", selection: Binding(
-                            get: { state.translationProvider },
-                            set: { newProvider in
-                                if newProvider == .apple {
-                                    Task { @MainActor in
-                                        let status = await AppleTranslationChecker.checkStatus()
-                                        switch status {
-                                        case .installed:
-                                            withAnimation(.easeInOut(duration: 0.2)) {
-                                                modelDownloadWarning = nil
-                                            }
-                                            state.translationProvider = .apple
-                                        case .notDownloaded:
-                                            withAnimation(.easeInOut(duration: 0.2)) {
-                                                modelDownloadWarning = "The on-device Chinese ⇋ English model is not downloaded.\nGo to: System Settings ➔ General ➔ Language & Region ➔ Translation Languages"
-                                            }
-                                        case .unsupported:
-                                            withAnimation(.easeInOut(duration: 0.2)) {
-                                                modelDownloadWarning = "Apple on-device translation requires macOS 15.0 Sequoia or newer."
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        modelDownloadWarning = nil
-                                    }
-                                    state.translationProvider = newProvider
-                                }
-                            }
-                        )) {
-                            ForEach(TranslationProvider.allCases) { p in
-                                Text(p.displayName).tag(p)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .controlSize(.mini)
-                    }
-
-                    // Inline warning banner for Apple Translation model status
-                    if let warning = modelDownloadWarning {
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.orange)
-                                .font(.system(size: 12))
-                                .padding(.top, 1)
-
-                            Text(warning)
-                                .font(.system(size: 10))
-                                .foregroundColor(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            Spacer()
-
-                            Button(action: {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    modelDownloadWarning = nil
-                                }
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary.opacity(0.6))
-                                    .font(.system(size: 12))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.orange.opacity(0.15))
-                        )
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-
-                    // Auto dismiss delay
-                    HStack {
-                        Text("Auto Dismiss:")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-
-                        Spacer()
-
-                        Picker("", selection: $state.translationDismissSeconds) {
-                            Text("Never (Default)").tag(0)
-                            Text("5 seconds").tag(5)
-                            Text("10 seconds").tag(10)
-                            Text("15 seconds").tag(15)
-                            Text("20 seconds").tag(20)
-                            Text("30 seconds").tag(30)
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .controlSize(.mini)
-                    }
-
-                    // Window Opacity
-                    HStack {
-                        Text("Window Opacity:")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-
-                        Button("Preview") {
-                            TranslationHudController.shared.show(
-                                original: "Teams Wake dynamic sizing and transparency preview.",
-                                translated: "Teams Wake dynamically adapts HUD size with frosted glass preview.",
-                                direction: "EN ➔ ZH",
-                                provider: state.translationProvider.displayName,
-                                targetPid: 0
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 9.5))
-                        .foregroundColor(.accentColor)
-
-                        Spacer()
-
-                        Slider(
-                            value: $state.hudOpacity,
-                            in: 0.3...1.0,
-                            step: 0.05
-                        )
-                        .frame(width: 80)
-                        .tint(.accentColor)
-
-                        Text("\(Int(state.hudOpacity * 100))%")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .frame(width: 32, alignment: .trailing)
-                    }
-                }
-                .padding(.top, 2)
-
-                Text("Select text in any app, then press \(state.translationShortcut.label) to translate and replace/copy")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .padding(.top, 1)
-            }
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.4))
-        )
-    }
 
     private var audioCaptureCard: some View {
         VStack(alignment: .leading, spacing: 8) {
