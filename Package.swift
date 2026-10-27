@@ -13,7 +13,7 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(path: "../swapr-trans"),
+        .package(url: "https://github.com/linrol/swapr-trans.git", from: "1.0.2"),
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.5")
     ],
     targets: [

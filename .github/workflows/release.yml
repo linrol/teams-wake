@@ -1,0 +1,167 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release DMG (Universal 2)
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install packaging dependencies
+        run: |
+          brew install create-dmg
+
+      - name: Build Universal 2 App Bundle & DMG Package
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "release")
+          GIT_DATE=$(git log -1 --format="%cd" --date=short 2>/dev/null || echo "")
+          GIT_MSG=$(git log -1 --format="%s" 2>/dev/null || echo "")
+
+          echo "=========================================="
+          echo "  🔨 Building Universal 2 (v${VERSION}) ... "
+          echo "=========================================="
+
+          # 1. Compile both arm64 and x86_64 architectures
+          swift build -c release --triple arm64-apple-macosx
+          swift build -c release --triple x86_64-apple-macosx
+
+          DIST_DIR="$GITHUB_WORKSPACE/dist"
+          APP="$DIST_DIR/TeamsWake.app"
+          CONTENTS="$APP/Contents"
+          MACOS="$CONTENTS/MacOS"
+          RESOURCES="$CONTENTS/Resources"
+
+          rm -rf "$DIST_DIR"
+          mkdir -p "$MACOS" "$RESOURCES"
+
+          # 2. Merge into Universal 2 fat binary
+          lipo -create -output "$MACOS/TeamsWake" \
+            .build/arm64-apple-macosx/release/TeamsWake \
+            .build/x86_64-apple-macosx/release/TeamsWake
+
+          chmod +x "$MACOS/TeamsWake"
+          file "$MACOS/TeamsWake"
+
+          # 3. Copy App Icon if exists
+          if [ -f "assets/AppIcon.icns" ]; then
+            cp -f "assets/AppIcon.icns" "$RESOURCES/AppIcon.icns"
+          fi
+
+          # 4. Generate Info.plist
+          cat <<INFOEOF > "$CONTENTS/Info.plist"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>TeamsWake</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.linrol.TeamsWake</string>
+              <key>CFBundleName</key>
+              <string>TeamsWake</string>
+              <key>CFBundleDisplayName</key>
+              <string>Teams Wake</string>
+              <key>CFBundleIconFile</key>
+              <string>AppIcon</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION}</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>GitCommit</key>
+              <string>${GIT_COMMIT}</string>
+              <key>GitCommitDate</key>
+              <string>${GIT_DATE}</string>
+              <key>GitCommitMessage</key>
+              <string>${GIT_MSG}</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>14.4</string>
+              <key>LSUIElement</key>
+              <true/>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSMicrophoneUsageDescription</key>
+              <string>Teams Wake requires microphone access to capture and transcribe local voice.</string>
+              <key>NSSpeechRecognitionUsageDescription</key>
+              <string>Teams Wake requires speech recognition permission to transcribe speech into text.</string>
+              <key>NSAudioCaptureUsageDescription</key>
+              <string>Teams Wake requires audio capture permission to tap remote call audio for real-time transcription.</string>
+          </dict>
+          </plist>
+          INFOEOF
+
+          # 5. Ad-hoc codesign and clear quarantine
+          xattr -cr "$APP"
+          codesign --force --deep --sign - "$APP"
+          xattr -cr "$APP"
+
+          # 6. Package styled DMG
+          STAGE="$DIST_DIR/dmg-stage"
+          DMG="$DIST_DIR/TeamsWake-${VERSION}.dmg"
+          rm -rf "$STAGE" "$DMG"
+          mkdir -p "$STAGE"
+          cp -R "$APP" "$STAGE/TeamsWake.app"
+
+          VOLICON_ARG=()
+          if [ -f "$APP/Contents/Resources/AppIcon.icns" ]; then
+            VOLICON_ARG=(--volicon "$APP/Contents/Resources/AppIcon.icns")
+          fi
+
+          create-dmg \
+            --volname "Teams Wake" \
+            "${VOLICON_ARG[@]}" \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "TeamsWake.app" 160 200 \
+            --hide-extension "TeamsWake.app" \
+            --app-drop-link 440 200 \
+            --overwrite \
+            "$DMG" \
+            "$STAGE/" || {
+              echo "create-dmg exited with fallback, packaging with hdiutil..."
+              rm -f "$DMG"
+              ln -s /Applications "$STAGE/Applications"
+              hdiutil create -volname "Teams Wake" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+            }
+
+          rm -rf "$STAGE"
+
+          # 7. Generate version.json for auto-updater
+          cat <<JSONEOF > "$DIST_DIR/version.json"
+          {
+            "version": "${VERSION}",
+            "commit": "${GIT_COMMIT}",
+            "date": "${GIT_DATE}",
+            "message": "${GIT_MSG}",
+            "dmgUrl": "https://github.com/linrol/teams-wake/releases/download/${TAG}/TeamsWake-${VERSION}.dmg"
+          }
+          JSONEOF
+
+          echo "=========================================="
+          echo "  🎉 Successfully generated DMG & version.json:"
+          ls -lh "$DIST_DIR"
+          echo "=========================================="
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/TeamsWake-*.dmg
+            dist/version.json
+          generate_release_notes: true
+          draft: false
+          prerelease: false

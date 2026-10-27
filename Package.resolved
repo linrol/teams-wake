@@ -8,6 +8,15 @@
         "revision" : "503b4bd1bbf7220882de39fe8ae6716aae4132da",
         "version" : "0.17.7"
       }
+    },
+    {
+      "identity" : "swapr-trans",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/linrol/swapr-trans.git",
+      "state" : {
+        "revision" : "f1f54e71bb1544fdcea3de51b700b00ae7de5072",
+        "version" : "1.0.2"
+      }
     }
   ],
   "version" : 2

@@ -63,15 +63,13 @@
 ```
 *本地增量极速编译、签名并自动覆盖安装到 `/Applications/TeamsWake.app`，重启应用直接体验验证。*
 
-### 2. 正式版本打包发布（Universal 2 双架构 + 自动发布）
+### 2. 正式版本发布（GitHub Actions 自动化 CI/CD）
 ```bash
-# 发布指定版本号（若远端该版本已存在则自动覆盖，不存在则新建）
-./scripts/release.sh 2.0.0
-
-# 默认发布当前版本
-./scripts/release.sh
+# 创建并推送版本 Tag，云端 GitHub Actions 自动编译发布
+git tag v2.0.2
+git push github v2.0.2
 ```
-*自动编译 Apple Silicon + Intel 双架构 Universal 2 二进制、打包 DMG、同步 Git Tag、自动发布或覆盖更新 GitHub Releases。*
+*推送 Tag 后，GitHub Actions 自动在云端编译 Universal 2（arm64 + x86_64）通用二进制、制作精美 DMG 安装包、生成 `version.json` 并发布至 GitHub Releases。*
 
 ---
 
