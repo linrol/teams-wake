@@ -7,6 +7,7 @@ public struct MenuBarPopup: View {
     @ObservedObject var updateManager = UpdateManager.shared
     @ObservedObject var audioCaptureMgr = NativeAudioCaptureManager.shared
     @State private var isScheduleExpanded: Bool = false
+    @State private var isAudioCaptureExpanded: Bool = false
     @State private var isAddingSchedule: Bool = false
     @State private var newScheduleName: String = ""
     @State private var newStartTime: String = "19:00"
@@ -348,42 +349,56 @@ public struct MenuBarPopup: View {
                 .toggleStyle(SwitchToggleStyle(tint: .accentColor))
                 .labelsHidden()
                 .controlSize(.mini)
-            }
 
-            // Listening Mode Selector: Remote Only, Local Mic, Both
-            VStack(alignment: .leading, spacing: 4) {
-                Picker("Listening Mode", selection: $audioCaptureMgr.listenMode) {
-                    ForEach(AudioListenMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isAudioCaptureExpanded.toggle()
                     }
+                }) {
+                    Image(systemName: isAudioCaptureExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.secondary)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-                .disabled(audioCaptureMgr.isRunning)
-
-                HStack(spacing: 4) {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 9))
-                    Text(audioCaptureMgr.listenMode.tipText)
-                        .font(.system(size: 9))
-                }
-                .foregroundColor(.secondary)
+                .buttonStyle(.plain)
             }
 
-            HStack(spacing: 6) {
-                Image(systemName: "cpu")
-                    .font(.system(size: 10))
-                    .foregroundColor(.accentColor)
-                Text("SenseVoice CoreML local model ready (Auto ZH/EN/YUE/JA/KO, on-device)")
-                    .font(.system(size: 9))
+            if isAudioCaptureExpanded {
+                // Listening Mode Selector: Remote Only, Local Mic, Both
+                VStack(alignment: .leading, spacing: 4) {
+                    Picker("Listening Mode", selection: $audioCaptureMgr.listenMode) {
+                        ForEach(AudioListenMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .disabled(audioCaptureMgr.isRunning)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 9))
+                        Text(audioCaptureMgr.listenMode.tipText)
+                            .font(.system(size: 9))
+                    }
                     .foregroundColor(.secondary)
-            }
+                }
+                .padding(.top, 2)
 
-            if let err = audioCaptureMgr.errorMessage {
-                Text(err)
-                    .font(.system(size: 10))
-                    .foregroundColor(.red)
+                HStack(spacing: 6) {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 10))
+                        .foregroundColor(.accentColor)
+                    Text("SenseVoice CoreML local model ready (Auto ZH/EN/YUE/JA/KO, on-device)")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                }
+
+                if let err = audioCaptureMgr.errorMessage {
+                    Text(err)
+                        .font(.system(size: 10))
+                        .foregroundColor(.red)
+                }
             }
         }
         .padding(10)
