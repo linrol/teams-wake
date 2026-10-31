@@ -323,18 +323,20 @@ public struct MenuBarPopup: View {
 
 
     private var audioCaptureCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: audioCaptureMgr.isRunning ? "waveform.circle.fill" : "waveform.circle")
-                    .font(.system(size: 16))
-                    .foregroundColor(audioCaptureMgr.isRunning ? .green : .secondary)
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: audioCaptureMgr.isRunning ? "waveform.circle.fill" : "waveform.circle")
+                        .font(.system(size: 13))
+                        .foregroundColor(audioCaptureMgr.isRunning ? .green : .accentColor)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Voice Monitor (SenseVoice Offline)")
-                        .font(.system(size: 12, weight: .bold))
-                    Text(audioCaptureMgr.isRunning ? audioCaptureMgr.listenMode.runningStatusText : "Inactive (Toggle switch on right to start)")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Voice Monitor (SenseVoice Offline)")
+                            .font(.system(size: 12, weight: .medium))
+                        Text(audioCaptureMgr.isRunning ? audioCaptureMgr.listenMode.runningStatusText : "Inactive (Toggle switch on right to start)")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
                 }
 
                 Spacer()
@@ -345,6 +347,7 @@ public struct MenuBarPopup: View {
                 ))
                 .toggleStyle(SwitchToggleStyle(tint: .accentColor))
                 .labelsHidden()
+                .controlSize(.mini)
             }
 
             // Listening Mode Selector: Remote Only, Local Mic, Both
@@ -356,6 +359,7 @@ public struct MenuBarPopup: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .controlSize(.small)
                 .disabled(audioCaptureMgr.isRunning)
 
                 HStack(spacing: 4) {
@@ -367,7 +371,7 @@ public struct MenuBarPopup: View {
                 .foregroundColor(.secondary)
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Image(systemName: "cpu")
                     .font(.system(size: 10))
                     .foregroundColor(.accentColor)
