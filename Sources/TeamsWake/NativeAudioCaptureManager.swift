@@ -3,6 +3,8 @@ import CoreAudio
 import AudioToolbox
 import AVFoundation
 import Combine
+import ScreenCaptureKit
+import CoreGraphics
 import FluidAudio
 
 // MARK: - High-performance Audio Resampler (Any Rate/Channels -> 16000Hz Mono Float32)
@@ -184,13 +186,14 @@ public final class AudioStreamTranscriber: @unchecked Sendable {
     private let targetSegmentSamples: Int = 16000 * 3 // 3s target segment length
     private let maxContinuousSamples: Int = 16000 * 5 // 5s hard cap for continuous non-stop speech
     private let minSpeechSamples: Int = 4800 // 300ms minimum speech length
-    private let voiceRmsThreshold: Float = 0.016 // Sensitivity threshold tuned for natural speech
+    private let voiceRmsThreshold: Float // Sensitivity threshold tuned for natural speech
 
     public private(set) var isRunning: Bool = false
     private let lock = NSLock()
 
-    public init(label: String) {
+    public init(label: String, rmsThreshold: Float = 0.012) {
         self.label = label
+        self.voiceRmsThreshold = rmsThreshold
     }
 
     public func start() throws {
@@ -282,11 +285,12 @@ public final class AudioStreamTranscriber: @unchecked Sendable {
         accumulatedSamples.removeAll()
         hasVoiceActivity = false
 
-        // Check average energy to silently drop floating noise (RMS < 0.015)
+        // Check average energy to silently drop floating noise (more sensitive for remote audio)
         var sumSq: Float = 0
         for s in chunk { sumSq += s * s }
         let chunkRms = sqrt(sumSq / Float(chunk.count))
-        guard chunkRms >= 0.015 else { return }
+        let minChunkRms: Float = (label == "Remote") ? 0.005 : 0.012
+        guard chunkRms >= minChunkRms else { return }
 
         Task.detached(priority: .userInitiated) { [weak self, chunk, label = self.label] in
             do {
@@ -302,359 +306,273 @@ public final class AudioStreamTranscriber: @unchecked Sendable {
     }
 }
 
-// MARK: - 1. Remote Process Tap Audio Interception (CATapDescription + AudioHardwareCreateProcessTap)
-public final class RemoteProcessTapEngine: @unchecked Sendable {
-    public static let shared = RemoteProcessTapEngine()
+// MARK: - 1. Remote Meeting Audio Interception (ScreenCaptureKit SCStream)
+public final class RemoteScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    public static let shared = RemoteScreenCaptureEngine()
 
-    private var tapID: AudioObjectID = 0
-    private var aggregateDeviceID: AudioObjectID = 0
-    private var ioProcID: AudioDeviceIOProcID?
-    private var audioFormat: AVAudioFormat?
-    private var packetCount: Int = 0
+    private var stream: SCStream?
     private let resampler = Mono16kResampler()
-    private let processingQueue = DispatchQueue(label: "com.teams-wake.remote-tap-proc", qos: .userInteractive)
+    private let processingQueue = DispatchQueue(label: "com.teams-wake.screen-audio-proc", qos: .userInteractive)
     public var onPCMSamples: (([Float]) -> Void)?
     public private(set) var isRunning: Bool = false
+    private var packetCount: Int = 0
 
-    private init() {}
-
-    private func getMyProcessAudioObjectID() -> AudioObjectID? {
-        var translateAddr = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var pid = getpid()
-        var targetObjID = AudioObjectID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &translateAddr,
-            UInt32(MemoryLayout<pid_t>.size),
-            &pid,
-            &size,
-            &targetObjID
-        )
-        return (status == noErr && targetObjID != kAudioObjectUnknown) ? targetObjID : nil
+    private override init() {
+        super.init()
     }
 
-    private func getDefaultOutputDeviceUID() -> String? {
-        var addr = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var defaultOutputID: AudioDeviceID = 0
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        let status = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &defaultOutputID)
-        guard status == noErr, defaultOutputID != 0 else { return nil }
-
-        var uidAddr = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceUID,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var outputUID: CFString = "" as CFString
-        var uidSize = UInt32(MemoryLayout<CFString>.size)
-        let uidStatus = withUnsafeMutablePointer(to: &outputUID) { ptr in
-            AudioObjectGetPropertyData(defaultOutputID, &uidAddr, 0, nil, &uidSize, ptr)
-        }
-        guard uidStatus == noErr else { return nil }
-        return outputUID as String
-    }
-
-    public func start() throws {
+    public func start() async throws {
         guard !isRunning else { return }
         packetCount = 0
 
-        // 1. Exclude self process
-        var excludeProcesses: [AudioObjectID] = []
-        if let myObjID = getMyProcessAudioObjectID() {
-            excludeProcesses.append(myObjID)
+        // 1. ScreenCaptureKit permission check
+        if !CGPreflightScreenCaptureAccess() {
+            let requested = CGRequestScreenCaptureAccess()
+            if !requested {
+                throw NSError(
+                    domain: "RemoteScreenCaptureEngine",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Screen & System Audio Recording permission is required. Please grant permission in System Settings -> Privacy & Security -> Screen & System Audio Recording."]
+                )
+            }
         }
 
-        // 2. Create mono global tap
-        let description = CATapDescription(monoGlobalTapButExcludeProcesses: excludeProcesses)
-        description.uuid = UUID()
-        description.name = "TeamsWake Remote Process Tap"
-        description.isPrivate = true
-        description.muteBehavior = .unmuted
-
-        var newTapID = AudioObjectID(kAudioObjectUnknown)
-        let tapStatus = AudioHardwareCreateProcessTap(description, &newTapID)
-        guard tapStatus == noErr else {
-            throw NSError(domain: "RemoteProcessTapEngine", code: Int(tapStatus), userInfo: [NSLocalizedDescriptionKey: "Failed to create CoreAudio Process Tap (Status: \(tapStatus))"])
-        }
-        self.tapID = newTapID
-
-        // 3. Get physical output device UID for clock anchor
-        guard let outputUID = getDefaultOutputDeviceUID() else {
-            AudioHardwareDestroyProcessTap(newTapID)
-            self.tapID = 0
-            throw NSError(domain: "RemoteProcessTapEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to get default output device UID as clock anchor"])
+        // 2. Fetch shareable displays
+        let shareableContent = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+        guard let display = shareableContent.displays.first else {
+            throw NSError(
+                domain: "RemoteScreenCaptureEngine",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "No active display found to attach audio stream."]
+            )
         }
 
-        // 4. Create aggregate virtual device
-        let aggregateUID = UUID().uuidString
-        let aggregateDict: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "TeamsWake Remote Aggregate Stream",
-            kAudioAggregateDeviceUIDKey: aggregateUID,
-            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
-            kAudioAggregateDeviceIsPrivateKey: true,
-            kAudioAggregateDeviceIsStackedKey: false,
-            kAudioAggregateDeviceTapAutoStartKey: true,
-            kAudioAggregateDeviceSubDeviceListKey: [
-                [
-                    kAudioSubDeviceUIDKey: outputUID
-                ]
-            ],
-            kAudioAggregateDeviceTapListKey: [
-                [
-                    kAudioSubTapDriftCompensationKey: true,
-                    kAudioSubTapUIDKey: description.uuid.uuidString
-                ]
-            ]
-        ]
+        // 3. Content filter: capture full display audio, exclude self process to avoid audio loop
+        let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
 
-        var newAggregateDeviceID = AudioObjectID(kAudioObjectUnknown)
-        let aggStatus = AudioHardwareCreateAggregateDevice(aggregateDict as CFDictionary, &newAggregateDeviceID)
-        guard aggStatus == noErr else {
-            AudioHardwareDestroyProcessTap(newTapID)
-            self.tapID = 0
-            throw NSError(domain: "RemoteProcessTapEngine", code: Int(aggStatus), userInfo: [NSLocalizedDescriptionKey: "Failed to create aggregate device (Status: \(aggStatus))"])
-        }
-        self.aggregateDeviceID = newAggregateDeviceID
+        // 4. Stream configuration for audio-only
+        let config = SCStreamConfiguration()
+        config.capturesAudio = true
+        config.excludesCurrentProcessAudio = true
+        config.sampleRate = 48000
+        config.channelCount = 1
 
-        // 5. Get tap stream format
-        var streamFormat = AudioStreamBasicDescription()
-        var propertySize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioTapPropertyFormat,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let formatStatus = AudioObjectGetPropertyData(newTapID, &propertyAddress, 0, nil, &propertySize, &streamFormat)
-        if formatStatus == noErr, let format = AVAudioFormat(streamDescription: &streamFormat) {
-            self.audioFormat = format
-        } else {
-            self.audioFormat = AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1)
-        }
+        // Minimal video footprint (0% GPU/CPU overhead)
+        config.width = 2
+        config.height = 2
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale.max)
+        config.showsCursor = false
+        config.queueDepth = 3
 
-        // 6. Register IOProc callback
-        let ioProc: AudioDeviceIOProc = { (deviceID, inNow, inInputData, inInputTime, outOutputData, inOutputTime, inClientData) -> OSStatus in
-            guard let clientData = inClientData else { return noErr }
-            let engine = Unmanaged<RemoteProcessTapEngine>.fromOpaque(clientData).takeUnretainedValue()
-            engine.handleIOData(inInputData: inInputData)
-            return noErr
-        }
+        // 5. Initialize and start stream
+        let newStream = SCStream(filter: filter, configuration: config, delegate: self)
+        try newStream.addStreamOutput(self, type: .audio, sampleHandlerQueue: processingQueue)
+        try await newStream.startCapture()
 
-        var newIOProcID: AudioDeviceIOProcID?
-        let procStatus = AudioDeviceCreateIOProcID(newAggregateDeviceID, ioProc, Unmanaged.passUnretained(self).toOpaque(), &newIOProcID)
-        guard procStatus == noErr, let validProcID = newIOProcID else {
-            stop()
-            throw NSError(domain: "RemoteProcessTapEngine", code: Int(procStatus), userInfo: [NSLocalizedDescriptionKey: "Failed to create IOProc"])
-        }
-        self.ioProcID = validProcID
-
-        // 7. Start aggregate device
-        let startStatus = AudioDeviceStart(newAggregateDeviceID, validProcID)
-        guard startStatus == noErr else {
-            stop()
-            throw NSError(domain: "RemoteProcessTapEngine", code: Int(startStatus), userInfo: [NSLocalizedDescriptionKey: "Failed to start audio device capture"])
-        }
-
+        self.stream = newStream
         self.isRunning = true
-        NSLog("[RemoteProcessTapEngine] 🚀 Remote audio CoreAudio Process Tap started! Format: \(self.audioFormat?.sampleRate ?? 0)Hz")
+        NSLog("[RemoteScreenCaptureEngine] 🚀 ScreenCaptureKit system audio capture started! (48kHz Mono, excludes self)")
     }
 
     public func stop() {
-        guard isRunning || tapID != 0 || aggregateDeviceID != 0 else { return }
+        guard isRunning || stream != nil else { return }
         isRunning = false
-
-        if let p = ioProcID, aggregateDeviceID != 0 {
-            AudioDeviceStop(aggregateDeviceID, p)
-            AudioDeviceDestroyIOProcID(aggregateDeviceID, p)
-            ioProcID = nil
+        let s = self.stream
+        self.stream = nil
+        if let s = s {
+            Task {
+                try? await s.stopCapture()
+            }
         }
-        if aggregateDeviceID != 0 {
-            AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
-            aggregateDeviceID = 0
-        }
-        if tapID != 0 {
-            AudioHardwareDestroyProcessTap(tapID)
-            tapID = 0
-        }
-        NSLog("[RemoteProcessTapEngine] Remote audio capture stopped")
+        NSLog("[RemoteScreenCaptureEngine] ScreenCaptureKit system audio capture stopped")
     }
 
-    private func handleIOData(inInputData: UnsafePointer<AudioBufferList>) {
-        guard isRunning else { return }
-        let abl = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inInputData))
-        guard let first = abl.first, let rawData = first.mData else { return }
+    // MARK: - SCStreamOutput Protocol Conformance
+    public nonisolated func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
+        guard outputType == .audio, CMSampleBufferIsValid(sampleBuffer), self.isRunning else { return }
 
-        let sampleRate = self.audioFormat?.sampleRate ?? 44100
-        let channels = Int(self.audioFormat?.channelCount ?? 1)
+        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee else {
+            return
+        }
+
+        let sampleRate = asbd.mSampleRate
+        var descCopy = asbd
+        guard let audioFormat = AVAudioFormat(streamDescription: &descCopy) else { return }
+
         var monoSamples: [Float] = []
 
-        if abl.count >= 2 {
-            let frameCount = Int(abl[0].mDataByteSize) / MemoryLayout<Float>.size
-            guard frameCount > 0, let leftPtr = abl[0].mData?.assumingMemoryBound(to: Float.self) else { return }
-            if let rightPtr = abl[1].mData?.assumingMemoryBound(to: Float.self) {
-                monoSamples = (0..<frameCount).map { (leftPtr[$0] + rightPtr[$0]) * 0.5 }
-            } else {
-                monoSamples = Array(UnsafeBufferPointer(start: leftPtr, count: frameCount))
+        do {
+            try sampleBuffer.withAudioBufferList { audioBufferList, _ in
+                guard let pcmBuffer = AVAudioPCMBuffer(pcmFormat: audioFormat, bufferListNoCopy: audioBufferList.unsafePointer) else {
+                    return
+                }
+
+                let frameCount = Int(pcmBuffer.frameLength)
+                guard frameCount > 0 else { return }
+
+                if let floatChannelData = pcmBuffer.floatChannelData {
+                    let channels = Int(pcmBuffer.format.channelCount)
+                    if channels == 1 {
+                        let ptr = floatChannelData[0]
+                        monoSamples = Array(UnsafeBufferPointer(start: ptr, count: frameCount))
+                    } else if channels >= 2 {
+                        let leftPtr = floatChannelData[0]
+                        let rightPtr = floatChannelData[1]
+                        monoSamples = (0..<frameCount).map { (leftPtr[$0] + rightPtr[$0]) * 0.5 }
+                    }
+                } else if let int16ChannelData = pcmBuffer.int16ChannelData {
+                    let channels = Int(pcmBuffer.format.channelCount)
+                    if channels == 1 {
+                        let ptr = int16ChannelData[0]
+                        monoSamples = (0..<frameCount).map { Float(ptr[$0]) / 32768.0 }
+                    } else if channels >= 2 {
+                        let leftPtr = int16ChannelData[0]
+                        let rightPtr = int16ChannelData[1]
+                        monoSamples = (0..<frameCount).map { (Float(leftPtr[$0]) + Float(rightPtr[$0])) * (0.5 / 32768.0) }
+                    }
+                }
             }
-        } else if channels == 2 {
-            let frameCount = Int(first.mDataByteSize) / (MemoryLayout<Float>.size * 2)
-            guard frameCount > 0 else { return }
-            let ptr = rawData.assumingMemoryBound(to: Float.self)
-            monoSamples = (0..<frameCount).map { (ptr[$0 * 2] + ptr[$0 * 2 + 1]) * 0.5 }
-        } else {
-            let frameCount = Int(first.mDataByteSize) / MemoryLayout<Float>.size
-            guard frameCount > 0 else { return }
-            let ptr = rawData.assumingMemoryBound(to: Float.self)
-            monoSamples = Array(UnsafeBufferPointer(start: ptr, count: frameCount))
+        } catch {
+            return
         }
 
         guard !monoSamples.isEmpty else { return }
 
-        processingQueue.async { [weak self] in
-            guard let self = self, self.isRunning else { return }
-
-            self.packetCount += 1
-            if self.packetCount % 50 == 0 {
-                let sampleCount = min(monoSamples.count, 160)
-                if sampleCount > 0 {
-                    let sumSquares = monoSamples[0..<sampleCount].reduce(Float(0)) { $0 + $1 * $1 }
-                    let rms = sqrt(sumSquares / Float(sampleCount))
-                    if rms > 0.005 {
-                        NSLog("[RemoteProcessTapEngine] 🔊 Received remote audio signal (RMS: %.4f, samples: %d)", rms, monoSamples.count)
-                    }
+        self.packetCount += 1
+        if self.packetCount % 50 == 0 {
+            let sampleCount = min(monoSamples.count, 160)
+            if sampleCount > 0 {
+                let sumSquares = monoSamples[0..<sampleCount].reduce(Float(0)) { $0 + $1 * $1 }
+                let rms = sqrt(sumSquares / Float(sampleCount))
+                if rms > 0.003 {
+                    NSLog("[RemoteScreenCaptureEngine] 🔊 Received remote audio signal (RMS: %.4f, samples: %d)", rms, monoSamples.count)
                 }
             }
+        }
 
-            if let resampledFloats = self.resampler.resample(floats: monoSamples, sampleRate: sampleRate) {
-                self.onPCMSamples?(resampledFloats)
-            }
+        if let resampledFloats = self.resampler.resample(floats: monoSamples, sampleRate: sampleRate) {
+            self.onPCMSamples?(resampledFloats)
+        }
+    }
+
+    public nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
+        NSLog("[RemoteScreenCaptureEngine] ❌ Stream stopped with error: \(error.localizedDescription)")
+        Task { @MainActor in
+            AppState.shared.addLog(message: "ScreenCaptureKit stream error: \(error.localizedDescription)", type: .error)
         }
     }
 }
 
-// MARK: - 2. Local Microphone Interception (CoreAudio HAL Input Device IOProc)
-public final class LocalMicHalEngine: @unchecked Sendable {
-    public static let shared = LocalMicHalEngine()
+// MARK: - 2. Local Microphone Interception (AVAudioEngine inputNode.installTap)
+public final class LocalMicAudioEngine: @unchecked Sendable {
+    public static let shared = LocalMicAudioEngine()
 
-    private var inputDeviceID: AudioDeviceID = 0
-    private var ioProcID: AudioDeviceIOProcID?
-    private var audioFormat: AVAudioFormat?
-    private var packetCount: Int = 0
+    private let audioEngine = AVAudioEngine()
     private let resampler = Mono16kResampler()
     private let processingQueue = DispatchQueue(label: "com.teams-wake.local-mic-proc", qos: .userInteractive)
     public var onPCMSamples: (([Float]) -> Void)?
     public private(set) var isRunning: Bool = false
+    private var packetCount: Int = 0
+    private let lock = NSLock()
 
-    private init() {}
+    private init() {
+        // Automatically respond to audio hardware changes (e.g. AirPods connected/disconnected)
+        NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: audioEngine,
+            queue: nil
+        ) { [weak self] _ in
+            self?.restart()
+        }
+    }
 
     public func start() throws {
+        lock.lock()
+        defer { lock.unlock() }
         guard !isRunning else { return }
         packetCount = 0
 
-        // 1. Get default input device ID (Microphone / AirPods Mic)
-        var addr = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var devID: AudioDeviceID = 0
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        let devStatus = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &devID)
-        guard devStatus == noErr, devID != 0 else {
-            throw NSError(domain: "LocalMicHalEngine", code: Int(devStatus), userInfo: [NSLocalizedDescriptionKey: "Failed to get default microphone input device"])
-        }
-        self.inputDeviceID = devID
+        let inputNode = audioEngine.inputNode
+        let bus: AVAudioNodeBus = 0
+        let format = inputNode.outputFormat(forBus: bus)
 
-        // 2. Read hardware stream format
-        var formatAddr = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyStreamFormat,
-            mScope: kAudioObjectPropertyScopeInput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var asbd = AudioStreamBasicDescription()
-        var formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        let fmtStatus = AudioObjectGetPropertyData(devID, &formatAddr, 0, nil, &formatSize, &asbd)
-        if fmtStatus == noErr, let format = AVAudioFormat(streamDescription: &asbd) {
-            self.audioFormat = format
-            NSLog("[LocalMicHalEngine] Microphone hardware format: \(format.sampleRate)Hz, \(format.channelCount) channels")
-        } else {
-            self.audioFormat = AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw NSError(
+                domain: "LocalMicAudioEngine",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to obtain valid microphone hardware format"]
+            )
         }
 
-        // 3. Attach AudioDeviceIOProc callback on input device
-        let ioProc: AudioDeviceIOProc = { (deviceID, inNow, inInputData, inInputTime, outOutputData, inOutputTime, inClientData) -> OSStatus in
-            guard let clientData = inClientData else { return noErr }
-            let engine = Unmanaged<LocalMicHalEngine>.fromOpaque(clientData).takeUnretainedValue()
-            engine.handleIOData(inInputData: inInputData)
-            return noErr
+        NSLog("[LocalMicAudioEngine] Microphone hardware format: \(format.sampleRate)Hz, \(format.channelCount) channels")
+
+        inputNode.removeTap(onBus: bus)
+        inputNode.installTap(onBus: bus, bufferSize: 1024, format: format) { [weak self] (buffer, _) in
+            self?.handlePCMBuffer(buffer)
         }
 
-        var newIOProcID: AudioDeviceIOProcID?
-        let procStatus = AudioDeviceCreateIOProcID(devID, ioProc, Unmanaged.passUnretained(self).toOpaque(), &newIOProcID)
-        guard procStatus == noErr, let validProcID = newIOProcID else {
-            throw NSError(domain: "LocalMicHalEngine", code: Int(procStatus), userInfo: [NSLocalizedDescriptionKey: "Failed to create microphone HAL IOProc"])
-        }
-        self.ioProcID = validProcID
-
-        // 4. Start hardware capture
-        let startStatus = AudioDeviceStart(devID, validProcID)
-        guard startStatus == noErr else {
-            stop()
-            throw NSError(domain: "LocalMicHalEngine", code: Int(startStatus), userInfo: [NSLocalizedDescriptionKey: "Failed to start microphone hardware capture"])
-        }
-
+        audioEngine.prepare()
+        try audioEngine.start()
         self.isRunning = true
-        NSLog("[LocalMicHalEngine] 🚀 Local microphone CoreAudio HAL capture started!")
+        NSLog("[LocalMicAudioEngine] 🚀 Local microphone AVAudioEngine capture started!")
     }
 
     public func stop() {
-        guard isRunning || inputDeviceID != 0 else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        guard isRunning else { return }
         isRunning = false
 
-        if let p = ioProcID, inputDeviceID != 0 {
-            AudioDeviceStop(inputDeviceID, p)
-            AudioDeviceDestroyIOProcID(inputDeviceID, p)
-            ioProcID = nil
-        }
-        inputDeviceID = 0
-        NSLog("[LocalMicHalEngine] Local microphone capture stopped")
+        audioEngine.inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
+        NSLog("[LocalMicAudioEngine] Local microphone capture stopped")
     }
 
-    private func handleIOData(inInputData: UnsafePointer<AudioBufferList>) {
+    public func restart() {
+        lock.lock()
+        defer { lock.unlock() }
         guard isRunning else { return }
-        let abl = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inInputData))
-        guard let first = abl.first, let rawData = first.mData else { return }
 
-        let sampleRate = self.audioFormat?.sampleRate ?? 44100
-        let channels = Int(self.audioFormat?.channelCount ?? 1)
+        NSLog("[LocalMicAudioEngine] 🔄 Audio route configuration changed, restarting AVAudioEngine...")
+        audioEngine.inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
+        audioEngine.reset()
+
+        do {
+            let inputNode = audioEngine.inputNode
+            let bus: AVAudioNodeBus = 0
+            let format = inputNode.outputFormat(forBus: bus)
+            guard format.sampleRate > 0, format.channelCount > 0 else { return }
+
+            inputNode.installTap(onBus: bus, bufferSize: 1024, format: format) { [weak self] (buffer, _) in
+                self?.handlePCMBuffer(buffer)
+            }
+            audioEngine.prepare()
+            try audioEngine.start()
+            NSLog("[LocalMicAudioEngine] 🚀 AVAudioEngine restarted successfully!")
+        } catch {
+            NSLog("[LocalMicAudioEngine] ❌ Failed to restart AVAudioEngine: \(error.localizedDescription)")
+        }
+    }
+
+    private func handlePCMBuffer(_ buffer: AVAudioPCMBuffer) {
+        guard isRunning else { return }
+        guard let floatChannelData = buffer.floatChannelData else { return }
+
+        let frameLength = Int(buffer.frameLength)
+        guard frameLength > 0 else { return }
+
+        let channels = Int(buffer.format.channelCount)
+        let sampleRate = buffer.format.sampleRate
         var monoSamples: [Float] = []
 
-        if abl.count >= 2 {
-            let frameCount = Int(abl[0].mDataByteSize) / MemoryLayout<Float>.size
-            guard frameCount > 0, let leftPtr = abl[0].mData?.assumingMemoryBound(to: Float.self) else { return }
-            if let rightPtr = abl[1].mData?.assumingMemoryBound(to: Float.self) {
-                monoSamples = (0..<frameCount).map { (leftPtr[$0] + rightPtr[$0]) * 0.5 }
-            } else {
-                monoSamples = Array(UnsafeBufferPointer(start: leftPtr, count: frameCount))
-            }
-        } else if channels == 2 {
-            let frameCount = Int(first.mDataByteSize) / (MemoryLayout<Float>.size * 2)
-            guard frameCount > 0 else { return }
-            let ptr = rawData.assumingMemoryBound(to: Float.self)
-            monoSamples = (0..<frameCount).map { (ptr[$0 * 2] + ptr[$0 * 2 + 1]) * 0.5 }
-        } else {
-            let frameCount = Int(first.mDataByteSize) / MemoryLayout<Float>.size
-            guard frameCount > 0 else { return }
-            let ptr = rawData.assumingMemoryBound(to: Float.self)
-            monoSamples = Array(UnsafeBufferPointer(start: ptr, count: frameCount))
+        if channels == 1 {
+            monoSamples = Array(UnsafeBufferPointer(start: floatChannelData[0], count: frameLength))
+        } else if channels >= 2 {
+            let leftPtr = floatChannelData[0]
+            let rightPtr = floatChannelData[1]
+            monoSamples = (0..<frameLength).map { (leftPtr[$0] + rightPtr[$0]) * 0.5 }
         }
 
         guard !monoSamples.isEmpty else { return }
@@ -669,7 +587,7 @@ public final class LocalMicHalEngine: @unchecked Sendable {
                     let sumSquares = monoSamples[0..<sampleCount].reduce(Float(0)) { $0 + $1 * $1 }
                     let rms = sqrt(sumSquares / Float(sampleCount))
                     if rms > 0.005 {
-                        NSLog("[LocalMicHalEngine] 🎤 Received microphone audio signal (RMS: %.4f, samples: %d)", rms, monoSamples.count)
+                        NSLog("[LocalMicAudioEngine] 🎤 Received microphone audio signal (RMS: %.4f, samples: %d)", rms, monoSamples.count)
                     }
                 }
             }
@@ -680,6 +598,8 @@ public final class LocalMicHalEngine: @unchecked Sendable {
         }
     }
 }
+
+public typealias LocalMicHalEngine = LocalMicAudioEngine
 
 // MARK: - Audio Listening Mode
 public enum AudioListenMode: String, CaseIterable, Identifiable {
@@ -703,18 +623,18 @@ public enum AudioListenMode: String, CaseIterable, Identifiable {
     public var runningStatusText: String {
         switch self {
         case .remoteOnly:
-            return "Listening to remote audio (Process Tap)"
+            return "Listening to remote audio (ScreenCaptureKit)"
         case .localOnly:
             return "Listening to local microphone (Noise filtered)"
         case .bidirectional:
-            return "Listening both sides (Remote + Mic)"
+            return "Listening both sides (ScreenCaptureKit + Mic)"
         }
     }
 
     public var tipText: String {
         switch self {
         case .remoteOnly:
-            return "Captures incoming meeting audio without using microphone"
+            return "Captures incoming meeting audio via ScreenCaptureKit without using microphone"
         case .localOnly:
             return "Captures local microphone speech with noise suppression"
         case .bidirectional:
@@ -793,9 +713,14 @@ private final class DownloadProgressThrottler: @unchecked Sendable {
                 let shouldCaptureRemote = (self.listenMode == .remoteOnly || self.listenMode == .bidirectional)
                 let shouldCaptureLocal = (self.listenMode == .localOnly || self.listenMode == .bidirectional)
 
-                // 2. Start remote audio tap and transcription pipeline (Process Tap)
+                // 2. Start remote audio stream and transcription pipeline (ScreenCaptureKit)
                 if shouldCaptureRemote {
-                    let remoteTrans = AudioStreamTranscriber(label: "Remote")
+                    if !CGPreflightScreenCaptureAccess() {
+                        AppState.shared.addLog(message: "Requesting Screen & System Audio Recording permission...", type: .warning)
+                        _ = CGRequestScreenCaptureAccess()
+                    }
+
+                    let remoteTrans = AudioStreamTranscriber(label: "Remote", rmsThreshold: 0.008)
                     remoteTrans.onCommitSentence = { sentence in
                         Task { @MainActor in
                             AppState.shared.addLog(message: "[Remote]: \(sentence)", type: .info)
@@ -804,16 +729,16 @@ private final class DownloadProgressThrottler: @unchecked Sendable {
                     try remoteTrans.start()
                     self.remoteTranscriber = remoteTrans
 
-                    RemoteProcessTapEngine.shared.onPCMSamples = { [weak remoteTrans] samples in
+                    RemoteScreenCaptureEngine.shared.onPCMSamples = { [weak remoteTrans] samples in
                         remoteTrans?.appendAudioSamples(samples)
                     }
-                    try RemoteProcessTapEngine.shared.start()
+                    try await RemoteScreenCaptureEngine.shared.start()
                 }
 
                 // 3. Start local microphone tap and transcription pipeline (HAL Mic)
                 if shouldCaptureLocal {
                     do {
-                        let localTrans = AudioStreamTranscriber(label: "Local")
+                        let localTrans = AudioStreamTranscriber(label: "Local", rmsThreshold: 0.016)
                         localTrans.onCommitSentence = { sentence in
                             Task { @MainActor in
                                 AppState.shared.addLog(message: "[Local]: \(sentence)", type: .success)
@@ -822,10 +747,10 @@ private final class DownloadProgressThrottler: @unchecked Sendable {
                         try localTrans.start()
                         self.localTranscriber = localTrans
 
-                        LocalMicHalEngine.shared.onPCMSamples = { [weak localTrans] samples in
+                        LocalMicAudioEngine.shared.onPCMSamples = { [weak localTrans] samples in
                             localTrans?.appendAudioSamples(samples)
                         }
-                        try LocalMicHalEngine.shared.start()
+                        try LocalMicAudioEngine.shared.start()
                     } catch {
                         NSLog("[NativeAudioCaptureManager] Microphone start skipped: \(error.localizedDescription)")
                         if self.listenMode == .localOnly {
@@ -844,9 +769,9 @@ private final class DownloadProgressThrottler: @unchecked Sendable {
 
                 switch self.listenMode {
                 case .bidirectional:
-                    AppState.shared.addLog(message: "🚀 Bidirectional SenseVoice offline audio monitor started! (Remote Tap + Local Mic)", type: .success)
+                    AppState.shared.addLog(message: "🚀 Bidirectional SenseVoice offline audio monitor started! (ScreenCaptureKit + Local Mic)", type: .success)
                 case .remoteOnly:
-                    AppState.shared.addLog(message: "🚀 Remote SenseVoice offline audio monitor started! (Process Tap)", type: .success)
+                    AppState.shared.addLog(message: "🚀 Remote SenseVoice offline audio monitor started! (ScreenCaptureKit)", type: .success)
                 case .localOnly:
                     AppState.shared.addLog(message: "🚀 Local SenseVoice offline audio monitor started! (Microphone)", type: .success)
                 }
@@ -862,13 +787,13 @@ private final class DownloadProgressThrottler: @unchecked Sendable {
     public func stopCapture() {
         AudioRouteWatchdog.shared.stopWatching()
 
-        RemoteProcessTapEngine.shared.stop()
-        RemoteProcessTapEngine.shared.onPCMSamples = nil
+        RemoteScreenCaptureEngine.shared.stop()
+        RemoteScreenCaptureEngine.shared.onPCMSamples = nil
         remoteTranscriber?.stop()
         remoteTranscriber = nil
 
-        LocalMicHalEngine.shared.stop()
-        LocalMicHalEngine.shared.onPCMSamples = nil
+        LocalMicAudioEngine.shared.stop()
+        LocalMicAudioEngine.shared.onPCMSamples = nil
         localTranscriber?.stop()
         localTranscriber = nil
 
@@ -876,34 +801,12 @@ private final class DownloadProgressThrottler: @unchecked Sendable {
         AppState.shared.addLog(message: "Audio capture stopped", type: .warning)
     }
 
-    /// Smoothly re-anchors audio capture streams when system default input or output changes
+    /// Smoothly re-anchors microphone stream when system default input changes
     public func handleRouteChanged() {
         guard isRunning else { return }
-        AppState.shared.addLog(message: "[Audio] Hardware route changed, re-anchoring audio stream...", type: .info)
+        AppState.shared.addLog(message: "[Audio] Hardware route changed, re-anchoring microphone stream...", type: .info)
 
-        // Stop current hardware capture instances
-        RemoteProcessTapEngine.shared.stop()
-        RemoteProcessTapEngine.shared.onPCMSamples = nil
-        LocalMicHalEngine.shared.stop()
-        LocalMicHalEngine.shared.onPCMSamples = nil
-
-        // Re-anchor taps with new default hardware devices
-        let shouldCaptureRemote = (self.listenMode == .remoteOnly || self.listenMode == .bidirectional)
-        let shouldCaptureLocal = (self.listenMode == .localOnly || self.listenMode == .bidirectional)
-
-        if shouldCaptureRemote, let remoteTrans = self.remoteTranscriber {
-            RemoteProcessTapEngine.shared.onPCMSamples = { [weak remoteTrans] samples in
-                remoteTrans?.appendAudioSamples(samples)
-            }
-            try? RemoteProcessTapEngine.shared.start()
-        }
-
-        if shouldCaptureLocal, let localTrans = self.localTranscriber {
-            LocalMicHalEngine.shared.onPCMSamples = { [weak localTrans] samples in
-                localTrans?.appendAudioSamples(samples)
-            }
-            try? LocalMicHalEngine.shared.start()
-        }
+        LocalMicAudioEngine.shared.restart()
     }
 }
 

@@ -32,7 +32,8 @@ let package = Package(
                 .linkedFramework("Translation"),
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AudioToolbox"),
-                .linkedFramework("AVFoundation")
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("ScreenCaptureKit")
             ]
         )
     ]
