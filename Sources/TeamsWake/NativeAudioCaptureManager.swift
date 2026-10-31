@@ -1,6 +1,4 @@
 import Foundation
-import CoreAudio
-import AudioToolbox
 import AVFoundation
 import Combine
 import ScreenCaptureKit
@@ -599,8 +597,6 @@ public final class LocalMicAudioEngine: @unchecked Sendable {
     }
 }
 
-public typealias LocalMicHalEngine = LocalMicAudioEngine
-
 // MARK: - Audio Listening Mode
 public enum AudioListenMode: String, CaseIterable, Identifiable {
     case remoteOnly = "remote"      // Remote meeting audio
@@ -650,15 +646,7 @@ public final class NativeAudioCaptureManager: ObservableObject {
 
     @Published public private(set) var isRunning: Bool = false
     @Published public var listenMode: AudioListenMode = .bidirectional
-    @Published public var remoteLanguage: String = "zh-CN"
-    @Published public var localLanguage: String = "zh-CN"
     @Published public var errorMessage: String? = nil
-
-    /// Backward compatibility property
-    public var captureLocalMic: Bool {
-        get { listenMode == .bidirectional || listenMode == .localOnly }
-        set { listenMode = newValue ? .bidirectional : .remoteOnly }
-    }
 
     private var remoteTranscriber: AudioStreamTranscriber?
     private var localTranscriber: AudioStreamTranscriber?
@@ -760,12 +748,6 @@ private final class DownloadProgressThrottler: @unchecked Sendable {
                 }
 
                 self.isRunning = true
-                // Start monitoring audio hardware route changes (e.g. AirPods/Headphone plugged/unplugged)
-                AudioRouteWatchdog.shared.startWatching {
-                    Task { @MainActor in
-                        NativeAudioCaptureManager.shared.handleRouteChanged()
-                    }
-                }
 
                 switch self.listenMode {
                 case .bidirectional:
@@ -785,8 +767,6 @@ private final class DownloadProgressThrottler: @unchecked Sendable {
     }
 
     public func stopCapture() {
-        AudioRouteWatchdog.shared.stopWatching()
-
         RemoteScreenCaptureEngine.shared.stop()
         RemoteScreenCaptureEngine.shared.onPCMSamples = nil
         remoteTranscriber?.stop()
@@ -799,89 +779,5 @@ private final class DownloadProgressThrottler: @unchecked Sendable {
 
         isRunning = false
         AppState.shared.addLog(message: "Audio capture stopped", type: .warning)
-    }
-
-    /// Smoothly re-anchors microphone stream when system default input changes
-    public func handleRouteChanged() {
-        guard isRunning else { return }
-        AppState.shared.addLog(message: "[Audio] Hardware route changed, re-anchoring microphone stream...", type: .info)
-
-        LocalMicAudioEngine.shared.restart()
-    }
-}
-
-// MARK: - Audio Route Migration Watchdog
-public final class AudioRouteWatchdog: @unchecked Sendable {
-    public static let shared = AudioRouteWatchdog()
-
-    private let queue = DispatchQueue(label: "com.teams-wake.audio-watchdog", qos: .utility)
-    private var isWatching = false
-    private var debounceWorkItem: DispatchWorkItem?
-    private var defaultInputListener: AudioObjectPropertyListenerBlock?
-    private var defaultOutputListener: AudioObjectPropertyListenerBlock?
-
-    private init() {}
-
-    public func startWatching(onRouteChange: @escaping @Sendable () -> Void) {
-        queue.async { [weak self] in
-            guard let self = self, !self.isWatching else { return }
-            self.isWatching = true
-
-            let listener: AudioObjectPropertyListenerBlock = { _, _ in
-                self.queue.async {
-                    self.debounceWorkItem?.cancel()
-                    let item = DispatchWorkItem {
-                        onRouteChange()
-                    }
-                    self.debounceWorkItem = item
-                    self.queue.asyncAfter(deadline: .now() + 0.5, execute: item)
-                }
-            }
-
-            self.defaultInputListener = listener
-            self.defaultOutputListener = listener
-
-            var inputAddr = AudioObjectPropertyAddress(
-                mSelector: kAudioHardwarePropertyDefaultInputDevice,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-            var outputAddr = AudioObjectPropertyAddress(
-                mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-
-            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &inputAddr, self.queue, listener)
-            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &outputAddr, self.queue, listener)
-        }
-    }
-
-    public func stopWatching() {
-        queue.async { [weak self] in
-            guard let self = self, self.isWatching else { return }
-            self.isWatching = false
-            self.debounceWorkItem?.cancel()
-
-            if let inputListener = self.defaultInputListener {
-                var inputAddr = AudioObjectPropertyAddress(
-                    mSelector: kAudioHardwarePropertyDefaultInputDevice,
-                    mScope: kAudioObjectPropertyScopeGlobal,
-                    mElement: kAudioObjectPropertyElementMain
-                )
-                AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &inputAddr, self.queue, inputListener)
-                self.defaultInputListener = nil
-            }
-
-            if let outputListener = self.defaultOutputListener {
-                var outputAddr = AudioObjectPropertyAddress(
-                    mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-                    mScope: kAudioObjectPropertyScopeGlobal,
-                    mElement: kAudioObjectPropertyElementMain
-                )
-                AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &outputAddr, self.queue, outputListener)
-                self.defaultOutputListener = nil
-            }
-        }
     }
 }
