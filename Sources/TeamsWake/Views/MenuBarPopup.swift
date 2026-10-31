@@ -1,13 +1,12 @@
 import SwiftUI
 import AppKit
 import SwaprTransKit
+import KatibKit
 
 public struct MenuBarPopup: View {
     @ObservedObject var state = AppState.shared
     @ObservedObject var updateManager = UpdateManager.shared
-    @ObservedObject var audioCaptureMgr = NativeAudioCaptureManager.shared
     @State private var isScheduleExpanded: Bool = false
-    @State private var isAudioCaptureExpanded: Bool = false
     @State private var isAddingSchedule: Bool = false
     @State private var newScheduleName: String = ""
     @State private var newStartTime: String = "19:00"
@@ -36,8 +35,8 @@ public struct MenuBarPopup: View {
             // MARK: - Auto-Translate Section (Powered by SwaprTransKit)
             SwaprTransSettingsView(isCollapsible: true)
 
-            // MARK: - Native Audio Capture Section
-            audioCaptureCard
+            // MARK: - Voice Monitor Section (Powered by KatibKit)
+            KatibSettingsView(isCollapsible: true)
 
             // MARK: - Logs View
             logsSection
@@ -313,92 +312,6 @@ public struct MenuBarPopup: View {
                     }
                 }
                 .padding(.top, 4)
-            }
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.4))
-        )
-    }
-
-
-    private var audioCaptureCard: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: audioCaptureMgr.isRunning ? "waveform.circle.fill" : "waveform.circle")
-                        .font(.system(size: 13))
-                        .foregroundColor(audioCaptureMgr.isRunning ? .green : .accentColor)
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Voice Monitor (SenseVoice Offline)")
-                            .font(.system(size: 12, weight: .medium))
-                        Text(audioCaptureMgr.isRunning ? audioCaptureMgr.listenMode.runningStatusText : "Inactive (Toggle switch on right to start)")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                Spacer()
-
-                Toggle("", isOn: Binding(
-                    get: { audioCaptureMgr.isRunning },
-                    set: { _ in audioCaptureMgr.toggleCapture() }
-                ))
-                .toggleStyle(SwitchToggleStyle(tint: .accentColor))
-                .labelsHidden()
-                .controlSize(.mini)
-
-                Button(action: {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isAudioCaptureExpanded.toggle()
-                    }
-                }) {
-                    Image(systemName: isAudioCaptureExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-
-            if isAudioCaptureExpanded {
-                // Listening Mode Selector: Remote Only, Local Mic, Both
-                VStack(alignment: .leading, spacing: 4) {
-                    Picker("Listening Mode", selection: $audioCaptureMgr.listenMode) {
-                        ForEach(AudioListenMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .disabled(audioCaptureMgr.isRunning)
-
-                    HStack(spacing: 4) {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 9))
-                        Text(audioCaptureMgr.listenMode.tipText)
-                            .font(.system(size: 9))
-                    }
-                    .foregroundColor(.secondary)
-                }
-                .padding(.top, 2)
-
-                HStack(spacing: 6) {
-                    Image(systemName: "cpu")
-                        .font(.system(size: 10))
-                        .foregroundColor(.accentColor)
-                    Text("SenseVoice CoreML local model ready (Auto ZH/EN/YUE/JA/KO, on-device)")
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
-                }
-
-                if let err = audioCaptureMgr.errorMessage {
-                    Text(err)
-                        .font(.system(size: 10))
-                        .foregroundColor(.red)
-                }
             }
         }
         .padding(10)

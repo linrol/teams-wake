@@ -5,8 +5,17 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/FluidInference/FluidAudio.git",
       "state" : {
-        "revision" : "503b4bd1bbf7220882de39fe8ae6716aae4132da",
-        "version" : "0.17.7"
+        "revision" : "e15287985625dbf544a343df679436789ffb03fb",
+        "version" : "0.18.0"
+      }
+    },
+    {
+      "identity" : "katib",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/linrol/katib.git",
+      "state" : {
+        "revision" : "f95bf642e78cf749e232519ef1f563d3f53e0c03",
+        "version" : "1.0.0"
       }
     },
     {

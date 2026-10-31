@@ -1,11 +1,19 @@
 import SwiftUI
 import AppKit
+import KatibKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Run as an accessory app: no Dock icon, stays in the menu bar as a status item
         NSApp.setActivationPolicy(.accessory)
         UpdateManager.shared.startBackgroundCheck()
+
+        // Forward Katib speech logs to TeamsWake activity logs
+        KatibManager.shared.onLog = { message, isError in
+            Task { @MainActor in
+                AppState.shared.addLog(message: message, type: isError ? .error : .info)
+            }
+        }
     }
 }
 

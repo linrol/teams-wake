@@ -14,14 +14,14 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/linrol/swapr-trans.git", from: "1.0.4"),
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.5")
+        .package(url: "https://github.com/linrol/katib.git", from: "1.0.0")
     ],
     targets: [
         .executableTarget(
             name: "TeamsWake",
             dependencies: [
                 .product(name: "SwaprTransKit", package: "swapr-trans"),
-                .product(name: "FluidAudio", package: "FluidAudio")
+                .product(name: "KatibKit", package: "katib")
             ],
             path: "Sources/TeamsWake",
             linkerSettings: [
@@ -30,8 +30,6 @@ let package = Package(
                 .linkedFramework("AppKit"),
                 .linkedFramework("ApplicationServices"),
                 .linkedFramework("Translation"),
-                .linkedFramework("CoreAudio"),
-                .linkedFramework("AudioToolbox"),
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("ScreenCaptureKit")
             ]
