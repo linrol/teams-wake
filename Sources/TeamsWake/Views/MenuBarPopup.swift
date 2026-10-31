@@ -33,7 +33,7 @@ public struct MenuBarPopup: View {
             scheduleCard
 
             // MARK: - Auto-Translate Section (Powered by SwaprTransKit)
-            SwaprTransSettingsView()
+            SwaprTransSettingsView(isCollapsible: true)
 
             // MARK: - Native Audio Capture Section
             audioCaptureCard

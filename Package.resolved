@@ -14,8 +14,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/linrol/swapr-trans.git",
       "state" : {
-        "revision" : "f1f54e71bb1544fdcea3de51b700b00ae7de5072",
-        "version" : "1.0.2"
+        "revision" : "99eaf8ef5eed3703ce89e99c94d286f903ddfc7e",
+        "version" : "1.0.4"
       }
     }
   ],
