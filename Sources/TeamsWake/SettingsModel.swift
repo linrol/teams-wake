@@ -149,7 +149,6 @@ public final class AppState: ObservableObject {
         addLog(message: "Teams Wake native daemon ready", type: .info)
 
         // Configure SwaprTrans integration
-        SwaprTransConfig.shared.ignoredAppNameKeywords.insert("teams")
         SwaprTransConfig.shared.logHandler = { [weak self] message, level in
             let type: LogType
             switch level {
