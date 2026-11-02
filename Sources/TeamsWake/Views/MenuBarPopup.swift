@@ -53,7 +53,6 @@ public struct MenuBarPopup: View {
         }
         .padding(14)
         .frame(width: 360)
-        .background(VisualEffectView(material: .popover, blendingMode: .behindWindow))
         .onAppear {
             state.checkPermission()
         }
