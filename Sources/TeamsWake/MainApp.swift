@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeAppState()
 
         UpdateManager.shared.startBackgroundCheck()
+        TeamsPushMonitor.shared.start()
 
         // Forward Katib speech logs to TeamsWake activity logs
         KatibManager.shared.onLog = { message, isError in

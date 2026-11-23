@@ -38,6 +38,9 @@ public struct MenuBarPopup: View {
             // MARK: - Voice Monitor Section (Powered by KatibKit)
             KatibSettingsView(isCollapsible: true)
 
+            // MARK: - Phone Push Section (Teams notifications → Bark)
+            TeamsPushSettingsView()
+
             // MARK: - Logs View
             logsSection
 
