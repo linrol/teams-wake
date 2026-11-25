@@ -22,6 +22,36 @@ jobs:
         run: |
           brew install create-dmg
 
+      # Sign every release with the same certificate so macOS keeps TCC permissions across updates.
+      # Secrets come from scripts/create-signing-cert.sh; without them the build falls back to ad-hoc.
+      - name: Import signing certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_P12" ]; then
+            echo "::warning::MACOS_CERT_P12 not set; release will be ad-hoc signed and users must re-grant permissions after updating."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          IDENTITY=$(security find-identity -p codesigning "$KEYCHAIN" | awk -F '"' '/\)/ {print $2; exit}')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No code signing identity found in MACOS_CERT_P12"
+            exit 1
+          fi
+          echo "Using signing identity: $IDENTITY"
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
       - name: Build Universal 2 App Bundle & DMG Package
         run: |
           TAG="${{ github.ref_name }}"
@@ -102,9 +132,15 @@ jobs:
           </plist>
           INFOEOF
 
-          # 5. Ad-hoc codesign and clear quarantine
+          # 5. Codesign (stable certificate when available) and clear quarantine
           xattr -cr "$APP"
-          codesign --force --deep --sign - "$APP"
+          if [ -n "${SIGN_IDENTITY:-}" ]; then
+            codesign --force --deep --keychain "$SIGN_KEYCHAIN" --sign "$SIGN_IDENTITY" "$APP"
+          else
+            codesign --force --deep --sign - "$APP"
+          fi
+          codesign -d -r- "$APP"
+          codesign --verify --strict "$APP"
           xattr -cr "$APP"
 
           # 6. Package styled DMG
@@ -163,3 +199,10 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+
+      - name: Clean up signing keychain
+        if: always()
+        run: |
+          if [ -n "${SIGN_KEYCHAIN:-}" ]; then
+            security delete-keychain "$SIGN_KEYCHAIN" || true
+          fi

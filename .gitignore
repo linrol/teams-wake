@@ -35,3 +35,6 @@ dist/
 
 # IDE
 .idea/
+
+# Code signing material (scripts/create-signing-cert.sh)
+.signing/

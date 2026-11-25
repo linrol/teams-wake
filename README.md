@@ -66,7 +66,6 @@
 
 ## 🛠️ 构建与发布工作流
 
-项目极简设计，仅保留两个核心脚本：
 
 ### 1. 日常开发本地验证（一键安装生效）
 ```bash
@@ -79,7 +78,16 @@
 ./scripts/uninstall.sh
 ```
 
-### 2. 正式版本发布（GitHub Actions 自动化 CI/CD）
+### 2. 代码签名证书（一次性配置，避免更新后重新授权）
+macOS 的辅助功能、屏幕录制等权限绑定在「Bundle ID + 签名证书」上。ad-hoc 签名每次构建都会变化，导致每次更新都要重新授权。执行一次以下脚本生成长期有效的自签名证书：
+```bash
+./scripts/create-signing-cert.sh
+```
+脚本会把证书导入登录钥匙串（`install.sh` 会自动使用），并输出到 `.signing/`（已 gitignore，请妥善备份）。再按提示把证书配置为 GitHub Secrets（`MACOS_CERT_P12`、`MACOS_CERT_PASSWORD`），CI 即会用同一证书签名发布版本。
+
+> ⚠️ 证书一旦使用请勿重新生成，更换证书会让所有用户重新授权一次。未配置 Secrets 时 CI 回退为 ad-hoc 签名。
+
+### 3. 正式版本发布（GitHub Actions 自动化 CI/CD）
 ```bash
 # 创建并推送版本 Tag，云端 GitHub Actions 自动编译发布
 git tag v2.0.2

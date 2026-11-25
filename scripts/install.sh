@@ -91,19 +91,22 @@ EOF
 # 4. Clean quarantine attributes before signing
 xattr -cr "$APP_DEST"
 
-# 5. Code signing (using persistent certificate to maintain TCC accessibility permission)
+# 5. Code signing with a persistent certificate so TCC permissions survive rebuilds.
+# The default designated requirement pins the certificate, so other binaries can't inherit permissions.
+# Self-signed certs are untrusted by default, so don't filter with `find-identity -v`.
 echo "Signing $APP_DEST..."
-DR_REQ="designated => identifier \"$BUNDLE_ID\""
+SIGN_IDENTITY="${SIGN_IDENTITY:-TeamsWake Code Signing}"
 
-if security find-identity -v -p codesigning | grep -q "Teams Wake Dev"; then
-    echo "Found signing identity: Teams Wake Dev"
-    codesign --force --deep -r="$DR_REQ" --sign "Teams Wake Dev" "$APP_DEST"
+if security find-identity -p codesigning | grep -qF "\"$SIGN_IDENTITY\""; then
+    echo "Found signing identity: $SIGN_IDENTITY"
+    codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DEST"
 elif security find-identity -v -p codesigning | grep -q "Apple Development"; then
     IDENTITY=$(security find-identity -v -p codesigning | grep "Apple Development" | head -n 1 | awk -F '"' '{print $2}')
     echo "Found signing identity: $IDENTITY"
-    codesign --force --deep -r="$DR_REQ" --sign "$IDENTITY" "$APP_DEST"
+    codesign --force --deep --sign "$IDENTITY" "$APP_DEST"
 else
-    echo "Using ad-hoc signature (-s -)..."
+    echo "⚠️  No signing identity found; using ad-hoc signature (permissions reset on every install)."
+    echo "   Run scripts/create-signing-cert.sh once to fix this."
     codesign --force --deep --sign - "$APP_DEST"
 fi
 
