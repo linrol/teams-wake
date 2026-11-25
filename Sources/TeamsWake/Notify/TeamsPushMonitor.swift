@@ -113,6 +113,7 @@ public final class TeamsPushMonitor: ObservableObject {
                 try await BarkPushProvider.send(
                     title: "TeamsWake",
                     body: "Test push \(barkConfig.isEncrypted ? "(AES encrypted)" : "(plaintext)") ✅",
+                    app: "TeamsWake",
                     config: barkConfig
                 )
                 log("Bark test push sent", .success)
@@ -187,7 +188,7 @@ public final class TeamsPushMonitor: ObservableObject {
         }
 
         do {
-            try await BarkPushProvider.send(title: title, body: lines.joined(separator: "\n"), config: barkConfig)
+            try await BarkPushProvider.send(title: title, body: lines.joined(separator: "\n"), app: "Teams", config: barkConfig)
             pending.removeAll { message in batch.contains { $0.recId == message.recId } }
             lastPushAt = Date()
             lastFailureAt = nil

@@ -35,16 +35,17 @@ public enum BarkPushError: LocalizedError {
 
 /// Sends notifications through Bark (https://github.com/Finb/Bark), optionally AES-256-CBC encrypted.
 public enum BarkPushProvider {
-    public static func send(title: String, body: String, config: BarkConfig) async throws {
+    /// - Parameter app: Source app name, used to look up the notification icon in `PushIcons`.
+    public static func send(title: String, body: String, app: String, config: BarkConfig) async throws {
         if let error = config.validate() { throw BarkPushError.invalidConfig(error) }
 
-        let payload: [String: String] = [
+        var payload: [String: String] = [
             "title": title,
             "body": body,
             "group": "Teams",
-            "url": "msteams://",
-            "sound": "minuet"
+            "url": "msteams://"
         ]
+        if let icon = PushIcons.url(for: app) { payload["icon"] = icon }
         let base = config.serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
         var request = URLRequest(url: URL(string: "\(base)/\(config.deviceKey)")!)
         request.httpMethod = "POST"
