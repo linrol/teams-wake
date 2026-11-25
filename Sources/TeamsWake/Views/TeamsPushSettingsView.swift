@@ -5,6 +5,7 @@ import AppKit
 struct TeamsPushSettingsView: View {
     @ObservedObject private var monitor = TeamsPushMonitor.shared
     @State private var isExpanded = false
+    @State private var isAESKeyCopied = false
 
     var body: some View {
         VStack(spacing: 8) {
@@ -59,14 +60,22 @@ struct TeamsPushSettingsView: View {
                     )
                     .controlSize(.mini)
 
-                    field("Server", text: $monitor.serverURL, secure: false, prompt: "https://api.day.app")
+                    field("Server", text: $monitor.serverURL, secure: false, prompt: "https://bark.linrol.eu.org")
                     field("Device Key", text: $monitor.deviceKey, secure: true, prompt: "Bark device key")
-                    field("AES Key", text: $monitor.encryptionKey, secure: true, prompt: "32 chars (AES-256-CBC)")
-
-                    Text("In Bark → Encryption choose AES256 / CBC and enter the same key. The IV is random per push. Leave AES empty to send plaintext.")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 4) {
+                        field("AES Key", text: $monitor.encryptionKey, secure: false, prompt: "32 chars (AES-256-CBC)")
+                        iconButton(
+                            "arrow.triangle.2.circlepath",
+                            help: "Generate a new 32-char key and copy it"
+                        ) {
+                            monitor.encryptionKey = BarkPushProvider.generateEncryptionKey()
+                            copyAESKey()
+                        }
+                        iconButton(isAESKeyCopied ? "checkmark" : "doc.on.doc", help: "Copy key") {
+                            copyAESKey()
+                        }
+                        .disabled(monitor.encryptionKey.isEmpty)
+                    }
 
                     HStack {
                         Button(monitor.isSendingTest ? "Sending…" : "Send Test Push") {
@@ -144,6 +153,24 @@ struct TeamsPushSettingsView: View {
             .font(.system(size: 11))
             .controlSize(.small)
         }
+    }
+
+    private func iconButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11))
+                .frame(width: 16, height: 16)
+        }
+        .buttonStyle(.borderless)
+        .help(help)
+    }
+
+    private func copyAESKey() {
+        guard !monitor.encryptionKey.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(monitor.encryptionKey, forType: .string)
+        isAESKeyCopied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { isAESKeyCopied = false }
     }
 
     private func openFullDiskAccess() {

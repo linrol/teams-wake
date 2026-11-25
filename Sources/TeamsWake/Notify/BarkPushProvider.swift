@@ -79,8 +79,18 @@ public enum BarkPushProvider {
     }
 
     static func randomIV() -> String {
+        randomAlphanumeric(count: kCCBlockSizeAES128)
+    }
+
+    /// Generates a 32-character key for AES-256, typeable in the Bark iOS app.
+    public static func generateEncryptionKey() -> String {
+        randomAlphanumeric(count: kCCKeySizeAES256)
+    }
+
+    // randomElement() uses SystemRandomNumberGenerator, which is cryptographically secure on Apple platforms.
+    private static func randomAlphanumeric(count: Int) -> String {
         let chars = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
-        return String((0..<kCCBlockSizeAES128).map { _ in chars.randomElement()! })
+        return String((0..<count).map { _ in chars.randomElement()! })
     }
 
     static func aes256CBC(_ data: Data, key: String, iv: String) -> Data? {

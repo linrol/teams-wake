@@ -68,7 +68,7 @@ public final class TeamsPushMonitor: ObservableObject {
         isEnabled = defaults.bool(forKey: keyEnabled)
         let savedDelay = defaults.integer(forKey: keyDelay)
         delayMinutes = savedDelay > 0 ? savedDelay : 3
-        serverURL = defaults.string(forKey: keyServer) ?? "https://api.day.app"
+        serverURL = defaults.string(forKey: keyServer) ?? "https://bark.linrol.eu.org"
         deviceKey = defaults.string(forKey: keyDeviceKey) ?? ""
         encryptionKey = defaults.string(forKey: keyAESKey) ?? ""
     }

@@ -11,22 +11,28 @@ echo "=========================================="
 # 1. Fast incremental build for host architecture
 swift build -c release
 
+# Local dev build uses a distinct name/bundle id so it can run side-by-side with
+# the release TeamsWake.app (separate process, UserDefaults and TCC permissions).
+APP_NAME="${APP_NAME:-TeamsWakeDev}"
+BUNDLE_ID="${BUNDLE_ID:-com.linrol.TeamsWake.dev}"
+DISPLAY_NAME="${DISPLAY_NAME:-Teams Wake Dev}"
+
 BIN_PATH="$REPO_ROOT/.build/release/TeamsWake"
-APP_DEST="/Applications/TeamsWake.app"
+APP_DEST="/Applications/$APP_NAME.app"
 CONTENTS_DIR="$APP_DEST/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
 # 2. Terminate currently running instance
-killall TeamsWake 2>/dev/null || true
+killall "$APP_NAME" 2>/dev/null || true
 sleep 0.5
 
 # 3. In-place update App Bundle (preserve directory inode to maintain macOS TCC permissions)
 mkdir -p "$MACOS_DIR"
 mkdir -p "$RESOURCES_DIR"
 
-cp -f "$BIN_PATH" "$MACOS_DIR/TeamsWake"
-chmod +x "$MACOS_DIR/TeamsWake"
+cp -f "$BIN_PATH" "$MACOS_DIR/$APP_NAME"
+chmod +x "$MACOS_DIR/$APP_NAME"
 
 if [ -f "$REPO_ROOT/assets/AppIcon.icns" ]; then
     cp "$REPO_ROOT/assets/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
@@ -47,13 +53,13 @@ cat <<EOF > "$CONTENTS_DIR/Info.plist"
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>TeamsWake</string>
+    <string>${APP_NAME}</string>
     <key>CFBundleIdentifier</key>
-    <string>com.linrol.TeamsWake</string>
+    <string>${BUNDLE_ID}</string>
     <key>CFBundleName</key>
-    <string>TeamsWake</string>
+    <string>${APP_NAME}</string>
     <key>CFBundleDisplayName</key>
-    <string>Teams Wake</string>
+    <string>${DISPLAY_NAME}</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>
@@ -86,8 +92,8 @@ EOF
 xattr -cr "$APP_DEST"
 
 # 5. Code signing (using persistent certificate to maintain TCC accessibility permission)
-echo "Signing /Applications/TeamsWake.app..."
-DR_REQ='designated => identifier "com.linrol.TeamsWake"'
+echo "Signing $APP_DEST..."
+DR_REQ="designated => identifier \"$BUNDLE_ID\""
 
 if security find-identity -v -p codesigning | grep -q "Teams Wake Dev"; then
     echo "Found signing identity: Teams Wake Dev"
@@ -105,7 +111,7 @@ fi
 xattr -cr "$APP_DEST"
 
 echo "=========================================="
-echo "  🎉 Installed to /Applications/TeamsWake.app"
+echo "  🎉 Installed to $APP_DEST"
 echo "  🚀 Launching..."
 echo "=========================================="
 

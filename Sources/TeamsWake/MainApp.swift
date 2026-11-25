@@ -32,10 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupPopover() {
         let popover = NSPopover()
-        popover.contentSize = NSSize(width: 360, height: 500)
         popover.behavior = .transient
         popover.animates = true
-        popover.contentViewController = NSHostingController(rootView: MenuBarPopup())
+        // Let the popover track SwiftUI's ideal size so it grows/shrinks as cards expand/collapse
+        let hostingController = NSHostingController(rootView: MenuBarPopup())
+        hostingController.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = hostingController
         self.popover = popover
     }
 

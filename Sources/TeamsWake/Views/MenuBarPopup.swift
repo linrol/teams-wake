@@ -56,6 +56,8 @@ public struct MenuBarPopup: View {
         }
         .padding(14)
         .frame(width: 360)
+        // Pin to top so content doesn't jump while the popover resizes
+        .frame(maxHeight: .infinity, alignment: .top)
         .onAppear {
             state.checkPermission()
         }

@@ -72,7 +72,7 @@
 ```bash
 ./scripts/install.sh
 ```
-*本地增量极速编译、签名并自动覆盖安装到 `/Applications/TeamsWake.app`，重启应用直接体验验证。*
+*本地增量极速编译、签名并安装到 `/Applications/TeamsWakeDev.app`（Bundle ID `com.linrol.TeamsWake.dev`），可与正式版 `TeamsWake.app` 并存运行，配置与系统权限互不影响。可通过 `APP_NAME` / `BUNDLE_ID` / `DISPLAY_NAME` 环境变量自定义。*
 
 ### 2. 正式版本发布（GitHub Actions 自动化 CI/CD）
 ```bash
