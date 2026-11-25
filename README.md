@@ -74,6 +74,11 @@
 ```
 *本地增量极速编译、签名并安装到 `/Applications/TeamsWakeDev.app`（Bundle ID `com.linrol.TeamsWake.dev`），可与正式版 `TeamsWake.app` 并存运行，配置与系统权限互不影响。可通过 `APP_NAME` / `BUNDLE_ID` / `DISPLAY_NAME` 环境变量自定义。*
 
+卸载本地开发版（删除 App、配置、缓存并重置系统权限，不影响正式版）：
+```bash
+./scripts/uninstall.sh
+```
+
 ### 2. 正式版本发布（GitHub Actions 自动化 CI/CD）
 ```bash
 # 创建并推送版本 Tag，云端 GitHub Actions 自动编译发布
