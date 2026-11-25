@@ -60,10 +60,10 @@ struct TeamsPushSettingsView: View {
                     )
                     .controlSize(.mini)
 
-                    field("Server", text: $monitor.serverURL, secure: false, prompt: "https://bark.linrol.eu.org")
-                    field("Device Key", text: $monitor.deviceKey, secure: true, prompt: "Bark device key")
+                    field("Server", text: $monitor.serverURL, prompt: "https://bark.linrol.eu.org")
+                    field("Device Key", text: $monitor.deviceKey, prompt: "Bark device key")
                     HStack(spacing: 4) {
-                        field("AES Key", text: $monitor.encryptionKey, secure: false, prompt: "32 chars (AES-256-CBC)")
+                        field("AES Key", text: $monitor.encryptionKey, prompt: "32 chars (AES-256-CBC)")
                         iconButton(
                             "arrow.triangle.2.circlepath",
                             help: "Generate a new 32-char key and copy it"
@@ -137,18 +137,12 @@ struct TeamsPushSettingsView: View {
     }
 
     @ViewBuilder
-    private func field(_ label: String, text: Binding<String>, secure: Bool, prompt: String) -> some View {
+    private func field(_ label: String, text: Binding<String>, prompt: String) -> some View {
         HStack {
             Text(label)
                 .font(.system(size: 11))
                 .frame(width: 70, alignment: .leading)
-            Group {
-                if secure {
-                    SecureField(prompt, text: text)
-                } else {
-                    TextField(prompt, text: text)
-                }
-            }
+            TextField(prompt, text: text)
             .textFieldStyle(.roundedBorder)
             .font(.system(size: 11))
             .controlSize(.small)
